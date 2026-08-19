@@ -1,5 +1,11 @@
 # Bolt Card
 
+NOTICE :  
+the software in this repo is no longer maintained  
+do not use it  
+use [Bolt Card Hub - Phoenix Edition](https://github.com/boltcard/hub/) instead
+---
+
 ## Overview
 
 The bolt card enables a customer to make payment at a merchant point of sale over the bitcoin lightning network.
