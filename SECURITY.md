@@ -14,3 +14,16 @@ Please do not disclose any possible security vulnerabilities to third parties.
 - the one time link returned when a card is created hands over the card keys to
   whoever opens it first, so treat it as a secret and use it promptly
 - keep `.env`, macaroons and TLS certificates out of version control
+
+## How payments are protected
+
+- a withdraw request may be used for one payment only - the transaction limit,
+  the daily limit and the card balance are checked and the request is claimed in
+  a single database transaction that locks the card, so concurrent callbacks for
+  one card tap cannot each send a payment
+- a payment still in flight counts against the card balance, and a payment that
+  fails releases it again
+- a wrong card PIN consumes the withdraw request, so a PIN can be tried once per
+  card tap rather than being guessed in bulk
+- payments and notifications run in their own goroutines, each of which recovers
+  from a panic, so an unreachable lightning node cannot stop the service

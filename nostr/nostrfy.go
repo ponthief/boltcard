@@ -6,16 +6,22 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/boltcard/boltcard/db"
+	"github.com/boltcard/boltcard/safego"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip04"
 	log "github.com/sirupsen/logrus"
 )
 
 func SendNostrfication(card_id int, card_name string, payOrRec int) {
-	requestURL := fmt.Sprintf("https://%s/.well-known/nostr.json?name=%s", db.Get_setting("HOST_DOMAIN"), card_name)
+
+	defer safego.Recover("SendNostrfication")
+
+	requestURL := fmt.Sprintf("https://%s/.well-known/nostr.json?name=%s",
+		db.Get_setting("HOST_DOMAIN"), url.QueryEscape(card_name))
 	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 	if err != nil {
 		log.Warn(err.Error())
@@ -39,9 +45,20 @@ func SendNostrfication(card_id int, card_name string, payOrRec int) {
 			log.Warn(err.Error())
 			return
 		}
-		nnames := res["names"].(map[string]any)
+		// the response comes from another service, so its shape is checked
+		// rather than asserted
+		nnames, ok := res["names"].(map[string]any)
+		if !ok {
+			log.Warn("nostr.json names is not an object")
+			return
+		}
 		for key, value := range nnames {
-			nipNames[key] = value.(string)
+			name_value, ok := value.(string)
+			if !ok {
+				log.Warn("nostr.json name value is not a string")
+				continue
+			}
+			nipNames[key] = name_value
 		}
 	} else {
 		log.Warn("No NIP-05 addresses...Unable to send payment/receipt info")

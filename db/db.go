@@ -171,7 +171,8 @@ func Get_card_count_for_name_lnurlp(name string) (int, error) {
 	}
 	defer db.Close()
 
-	sqlStatement := `select count(card_id) from cards where card_name=$1 and lnurlp_enable='Y';`
+	sqlStatement := `select count(card_id) from cards where card_name=$1` +
+		` and lnurlp_enable='Y' and wiped='N';`
 
 	row := db.QueryRow(sqlStatement, name)
 	err = row.Scan(&card_count)
@@ -183,7 +184,9 @@ func Get_card_count_for_name_lnurlp(name string) (int, error) {
 }
 
 // gets the last record
-func Get_card_id_for_name(name string) (int, error) {
+// only cards with lnurlp enabled and not wiped are returned, matching the
+// check made when the lightning address is looked up
+func Get_card_id_for_name_lnurlp(name string) (int, error) {
 
 	card_id := 0
 
@@ -193,7 +196,8 @@ func Get_card_id_for_name(name string) (int, error) {
 	}
 	defer db.Close()
 
-	sqlStatement := `select card_id from cards where card_name=$1 order by card_id desc limit 1;`
+	sqlStatement := `select card_id from cards where card_name=$1` +
+		` and lnurlp_enable='Y' and wiped='N' order by card_id desc limit 1;`
 
 	row := db.QueryRow(sqlStatement, name)
 	err = row.Scan(&card_id)
@@ -309,7 +313,7 @@ func Update_card_uid_ctr(card_id int, uid string, ctr uint32) error {
 		return err
 	}
 	if count != 1 {
-		return nil
+		return errors.New("not one card record updated")
 	}
 
 	return nil
@@ -599,7 +603,131 @@ func Update_payment_invoice(card_payment_id int, ln_invoice string, amount_msats
 	return nil
 }
 
-func Update_payment_paid(card_payment_id int) error {
+// Authorize_payment checks the card payment rules and claims the payment for
+// sending, as a single atomic step.
+//
+// The card row is locked for the duration, so concurrent withdraw callbacks for
+// the same card are serialised. This is what stops one card tap being turned
+// into several payments, and stops parallel taps each seeing the same daily
+// total or balance.
+//
+// It returns false and a reason when the payment must not be sent. The caller
+// must only send the payment when it returns true.
+func Authorize_payment(card_payment_id int, invoice_sats int, check_day_and_balance bool) (bool, string, error) {
+
+	db, err := open()
+	if err != nil {
+		return false, "", err
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return false, "", err
+	}
+	// a commit later in this function makes the rollback a no-op
+	defer tx.Rollback()
+
+	// lock the card and the card payment for the rest of the transaction
+
+	var card_id int
+	var paid_flag string
+	var tx_limit_sats int
+	var day_limit_sats int
+	var allow_negative_balance string
+
+	sqlStatement := `SELECT cp.card_id, cp.paid_flag, c.tx_limit_sats, c.day_limit_sats,` +
+		` c.allow_negative_balance` +
+		` FROM card_payments AS cp INNER JOIN cards AS c ON c.card_id = cp.card_id` +
+		` WHERE cp.card_payment_id = $1 FOR UPDATE;`
+	row := tx.QueryRow(sqlStatement, card_payment_id)
+	err = row.Scan(&card_id, &paid_flag, &tx_limit_sats, &day_limit_sats,
+		&allow_negative_balance)
+	if err != nil {
+		return false, "", err
+	}
+
+	// the withdraw request may only be used once
+
+	if paid_flag != "N" {
+		return false, "payment already made", nil
+	}
+
+	if invoice_sats > tx_limit_sats {
+		return false, "over tx_limit_sats", nil
+	}
+
+	if check_day_and_balance {
+
+		// the daily total counts payments already claimed for sending,
+		// so payments still in flight are included
+
+		day_total_sats := 0
+
+		// SUM of a BIGINT column is NUMERIC, so it is cast before dividing,
+		// to keep the result a whole number of satoshis
+
+		sqlStatement = `SELECT COALESCE(SUM(amount_msats),0)::BIGINT/1000 FROM card_payments` +
+			` WHERE card_id = $1 AND paid_flag = 'Y'` +
+			` AND payment_time > NOW() - INTERVAL '1 DAY';`
+		row = tx.QueryRow(sqlStatement, card_id)
+		err = row.Scan(&day_total_sats)
+		if err != nil {
+			return false, "", err
+		}
+
+		if day_total_sats+invoice_sats > day_limit_sats {
+			return false, "over day_limit_sats", nil
+		}
+
+		// check the card balance if marked as 'must stay above zero' (default)
+
+		if allow_negative_balance != "Y" {
+			card_total_sats := 0
+
+			row = tx.QueryRow(card_total_sats_sql, card_id)
+			err = row.Scan(&card_total_sats)
+			if err != nil {
+				return false, "", err
+			}
+
+			if card_total_sats-invoice_sats < 0 {
+				return false, "not enough balance", nil
+			}
+		}
+	}
+
+	// claim the payment
+	// the paid_flag condition makes this safe against a concurrent claim
+
+	sqlStatement = `UPDATE card_payments SET paid_flag = 'Y', payment_time = NOW()` +
+		` WHERE card_payment_id = $1 AND paid_flag = 'N';`
+	res, err := tx.Exec(sqlStatement, card_payment_id)
+	if err != nil {
+		return false, "", err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return false, "", err
+	}
+	if count != 1 {
+		return false, "payment already made", nil
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return false, "", err
+	}
+
+	return true, "", nil
+}
+
+// Fail_payment consumes a withdraw request without sending a payment, so that
+// the request cannot be retried. The amount is cleared so that the failed
+// request counts towards neither the daily total nor the card balance.
+//
+// This is what limits a card PIN to one attempt per card tap.
+func Fail_payment(card_payment_id int, failure_reason string) error {
 
 	db, err := open()
 	if err != nil {
@@ -607,8 +735,10 @@ func Update_payment_paid(card_payment_id int) error {
 	}
 	defer db.Close()
 
-	sqlStatement := `UPDATE card_payments SET paid_flag = 'Y', payment_time = NOW() WHERE card_payment_id = $1;`
-	res, err := db.Exec(sqlStatement, card_payment_id)
+	sqlStatement := `UPDATE card_payments SET paid_flag = 'Y', amount_msats = NULL,` +
+		` payment_status = 'FAILED', failure_reason = $2, payment_status_time = NOW()` +
+		` WHERE card_payment_id = $1 AND paid_flag = 'N';`
+	res, err := db.Exec(sqlStatement, card_payment_id, failure_reason)
 	if err != nil {
 		return err
 	}
@@ -655,29 +785,8 @@ func Update_payment_status(card_payment_id int, payment_status string, failure_r
 	return nil
 }
 
-func Get_card_totals(card_id int) (int, error) {
-
-	db, err := open()
-	if err != nil {
-		return 0, err
-	}
-	defer db.Close()
-
-	day_total_msats := 0
-
-	sqlStatement := `SELECT COALESCE(SUM(amount_msats),0) FROM card_payments ` +
-		`WHERE card_id=$1 AND paid_flag='Y' ` +
-		`AND payment_time > NOW() - INTERVAL '1 DAY';`
-	row := db.QueryRow(sqlStatement, card_id)
-	err = row.Scan(&day_total_msats)
-	if err != nil {
-		return 0, err
-	}
-
-	day_total_sats := day_total_msats / 1000
-
-	return day_total_sats, nil
-}
+// the daily total is now measured inside Authorize_payment, so that it is read
+// under the same lock as the payment it authorises
 
 func Get_card_txs(card_id int, max_txs int) ([]Transaction, error) {
 	// open the database
@@ -792,32 +901,39 @@ func Get_latest_card_tx(card_id int, pay_rec int) (Transaction, error) {
 
 	return t, nil
 }
+
+// card_total_sats_sql sums settled receipts less payments, for one card_id.
+//
+// A payment counts once it has been claimed for sending (paid_flag = 'Y'), not
+// only once the node has reported a status, so that a payment in flight is
+// already taken off the balance. Failed payments are excluded, so the balance
+// recovers when a payment does not go through.
+const card_total_sats_sql = `SELECT COALESCE(SUM(tx_amount_msats),0)::BIGINT/1000 FROM (SELECT card_id, ` +
+	`card_payments.card_payment_id AS tx_id, 'payment' AS tx_type, ` +
+	`-amount_msats as tx_amount_msats, payment_status_time AS tx_time ` +
+	`FROM card_payments WHERE card_id = $1 AND payment_status != 'FAILED' ` +
+	`AND amount_msats IS NOT NULL AND amount_msats != 0 ` +
+	`AND (paid_flag = 'Y' OR payment_status != '') ` +
+	`UNION SELECT card_id, card_receipts.card_receipt_id AS tx_id, ` +
+	`'receipt' AS tx_type, amount_msats as tx_amount_msats, ` +
+	`receipt_status_time AS tx_time FROM card_receipts WHERE card_id = $1 ` +
+	`AND receipt_status = 'SETTLED' ORDER BY tx_time) AS transactions;`
+
 func Get_card_total_sats(card_id int) (int, error) {
 
 	db, err := open()
 	if err != nil {
 		return 0, err
 	}
+	defer db.Close()
 
-	card_total_msats := 0
+	card_total_sats := 0
 
-	sqlStatement := `SELECT COALESCE(SUM(tx_amount_msats),0) FROM (SELECT card_id, ` +
-		`card_payments.card_payment_id AS tx_id, 'payment' AS tx_type, ` +
-		`-amount_msats as tx_amount_msats, payment_status_time AS tx_time ` +
-		`FROM card_payments WHERE card_id = $1 AND payment_status != 'FAILED' ` +
-		`AND payment_status != '' ` +
-		`AND amount_msats != 0 UNION SELECT card_id, card_receipts.card_receipt_id AS tx_id, ` +
-		`'receipt' AS tx_type, amount_msats as tx_amount_msats, ` +
-		`receipt_status_time AS tx_time FROM card_receipts WHERE card_id = $1 ` +
-		`AND receipt_status = 'SETTLED' ORDER BY tx_time) AS transactions;`
-
-	row := db.QueryRow(sqlStatement, card_id)
-	err = row.Scan(&card_total_msats)
+	row := db.QueryRow(card_total_sats_sql, card_id)
+	err = row.Scan(&card_total_sats)
 	if err != nil {
 		return 0, err
 	}
-
-	card_total_sats := card_total_msats / 1000
 
 	return card_total_sats, nil
 }
