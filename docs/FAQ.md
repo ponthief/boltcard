@@ -34,3 +34,12 @@ The card settings can be fixed by using the 'Bolt Card NFC Card Creator' app. Th
 - Enter all '0's in Key 0 until the field is full and copy to Keys 1-4
 - Reset Card Now
 - present the card
+
+# Why do I have to tap the card again after typing the PIN wrongly ?
+
+A wrong PIN uses up the withdraw request, so that only one PIN can be tried per
+card tap. Without this, the four digit PIN could be guessed in bulk during the
+life of a single withdraw request.
+
+Tap the card again to get a new withdraw request and enter the PIN once more.
+The failed attempt does not count towards the daily limit or the card balance.

@@ -84,8 +84,7 @@ func setup_card_record(uid string, ctr uint32, uid_bin []byte, ctr_bin []byte, c
 
 		if err != nil {
 			log.WithFields(log.Fields{
-				"card.card_id":     card.Card_id,
-				"card.k2_cmac_key": card.K2_cmac_key,
+				"card.card_id": card.Card_id,
 			}).Warn("card.k2_cmac_key decode failed - remove the invalid record")
 			return err
 		}
@@ -97,9 +96,9 @@ func setup_card_record(uid string, ctr uint32, uid_bin []byte, ctr_bin []byte, c
 		}
 
 		if cmac_valid == true {
+			// the card keys are secrets, so they are not logged
 			log.WithFields(log.Fields{
-				"card.card_id":     card.Card_id,
-				"card.k2_cmac_key": card.K2_cmac_key,
+				"card.card_id": card.Card_id,
 			}).Info("cmac match found")
 
 			// store the uid and ctr in the card record
@@ -120,9 +119,10 @@ func setup_card_record(uid string, ctr uint32, uid_bin []byte, ctr_bin []byte, c
 
 func parse_request(req *http.Request) (int, error) {
 
+	// the p and c parameters are card data, so the query string is not logged
+
 	pid := os.Getpid()
-	url := req.URL.RequestURI()
-	log.WithFields(log.Fields{"pid": pid, "url": url}).Debug("ln request")
+	log.WithFields(log.Fields{"pid": pid, "path": req.URL.Path}).Debug("ln request")
 
 	param_p, param_c := get_p_c(req, "p", "c")
 
@@ -175,7 +175,10 @@ func parse_request(req *http.Request) (int, error) {
 
 	uid_str := hex.EncodeToString(uid)
 
-	log.WithFields(log.Fields{"uid": uid_str, "ctr": ctr_int}).Info("decrypted card data")
+	// the card UID identifies the card holder, so it is kept out of the
+	// production logs - see docs/CARD_PRIVACY.md
+
+	log.WithFields(log.Fields{"uid": uid_str, "ctr": ctr_int}).Debug("decrypted card data")
 
 	card_count, err := db.Get_card_count_for_uid(uid_str)
 

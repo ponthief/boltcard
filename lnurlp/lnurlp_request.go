@@ -1,11 +1,13 @@
 package lnurlp
 
 import (
+	"encoding/json"
 	"github.com/boltcard/boltcard/db"
 	"github.com/boltcard/boltcard/resp_err"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
 	"net/http"
+	"net/url"
 )
 
 func Response(w http.ResponseWriter, r *http.Request) {
@@ -47,16 +49,25 @@ func Response(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata := "[[\\\"text/identifier\\\",\\\"" + name + "@" + domain + "\\\"],[\\\"text/plain\\\",\\\"bolt card deposit\\\"]]"
+	// the response is marshalled rather than concatenated, so that a card name
+	// holding a quote cannot produce a broken or altered response
 
-	jsonData := []byte(`{"status":"OK",` +
-		`"callback":"https://` + domain + `/lnurlp/` + name + `",` +
-		`"tag":"payRequest",` +
-		`"maxSendable":1000000000,` +
-		`"minSendable":1000,` +
-		`"metadata":"` + metadata + `",` +
-		`"commentAllowed":0` +
-		`}`)
+	response := make(map[string]interface{})
+
+	response["status"] = "OK"
+	response["callback"] = "https://" + domain + "/lnurlp/" + url.PathEscape(name)
+	response["tag"] = "payRequest"
+	response["maxSendable"] = Max_sendable_msat
+	response["minSendable"] = Min_sendable_msat
+	response["metadata"] = metadata_json(name, domain)
+	response["commentAllowed"] = 0
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		log.Warn(err)
+		resp_err.Write(w)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
