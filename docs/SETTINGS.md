@@ -34,6 +34,10 @@ Here are the descriptions of values available to use in the `settings` table:
 | FUNCTION_INTERNAL_API | DISABLE | system level switch for activating the internal API |
 | INTERNAL_API_KEY | | shared secret required by every internal API call - see [the internal API](INTERNAL_API.md) |
 | INTERNAL_API_LISTEN | 127.0.0.1:9001 | address the internal API listens on - defaults to the loopback interface |
+| TRUSTED_PROXY_COUNT | 1 | number of reverse proxies in front of the service, so that rate limiting counts each caller rather than the proxy - `1` for the supplied docker install, empty or `0` when nothing is in front |
+| EXTERNAL_RATE_LIMIT_PER_MIN | 120 | requests per minute allowed per caller on the public endpoints |
+| EXTERNAL_RATE_BURST | 40 | requests a caller may make at once on the public endpoints |
+| EXTERNAL_MAX_CONCURRENT | 32 | public requests handled at once, which bounds the database connections in use |
 | SENDGRID_API_KEY      | | User API Key from SendGrid.com             |
 | SENDGRID_EMAIL_SENDER | | Single Sender email address verified by SendGrid |
 | LN_INVOICE_EXPIRY_SEC | 3600 | LN invoice's expiry time in seconds |

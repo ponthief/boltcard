@@ -42,3 +42,6 @@ sed -i "s/[(]'FUNCTION_LNURLW'[^)]*[)]/(\'FUNCTION_LNURLW\', \'ENABLE\')/" sql/s
 sed -i "s/[(]'FUNCTION_LNURLP'[^)]*[)]/(\'FUNCTION_LNURLP\', \'DISABLE\')/" sql/settings.sql
 sed -i "s/[(]'FUNCTION_EMAIL'[^)]*[)]/(\'FUNCTION_EMAIL\', \'DISABLE\')/" sql/settings.sql
 sed -i "s/[(]'LN_INVOICE_EXPIRY_SEC'[^)]*[)]/(\'LN_INVOICE_EXPIRY_SEC\', \'3600\')/" sql/settings.sql
+# this install puts Caddy in front of the service, so one proxy is trusted for
+# the forwarded address used to tell callers apart when rate limiting
+sed -i "s/[(]'TRUSTED_PROXY_COUNT'[^)]*[)]/(\'TRUSTED_PROXY_COUNT\', \'1\')/" sql/settings.sql
