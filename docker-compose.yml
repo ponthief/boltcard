@@ -13,9 +13,10 @@ services:
       - DB_HOST=db
       - DB_USER=cardapp
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_PORT=5432    
+      - DB_PORT=5432
       - DB_NAME=card_db
-    expose: 
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    expose:
       - "9000"
     volumes:
       - ${PWD}/tls.cert:/boltcard/tls.cert

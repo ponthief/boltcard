@@ -17,6 +17,10 @@ Environment="DB_USER=cardapp"
 Environment="DB_PASSWORD=database_password"
 Environment="DB_NAME=card_db"
 
+# shared secret for the internal API, e.g. `openssl rand -hex 32`
+# this may be set in the settings table instead
+Environment="INTERNAL_API_KEY="
+
 ExecStart=/bin/bash /home/ubuntu/boltcard/script/s_launch
 
 [Install]

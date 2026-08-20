@@ -55,7 +55,16 @@ $ docker logs [OPTIONS] CONTAINER
 Run `$ docker ps` to list containers and get container names/ids
 
 #### running internal API commands
--  `docker exec boltcard_main curl 'localhost:9001/createboltcard?card_name=card_5&enable=false&tx_max=1000&day_max=10000&uid_privacy=true&allow_neg_bal=true'`
--  `docker exec boltcard_main curl 'localhost:9001/updateboltcard?card_name=card_5&enable=true&tx_max=100&day_max=1000'`
--  `docker exec boltcard_main curl 'localhost:9001/wipeboltcard?card_name=card_5'`
--  `docker exec boltcard_main curl 'localhost:9001/getboltcard?card_name=card_5'`
+
+The internal API requires an API key and listens on the container's loopback
+interface only, see [the internal API](INTERNAL_API.md). `docker_init.sh` writes
+a generated `INTERNAL_API_KEY` to `.env`, which docker compose passes to the
+container, so the commands below read the key from the container environment.
+
+-  `docker exec boltcard_main sh -c 'curl -H "Authorization: Bearer $INTERNAL_API_KEY" "localhost:9001/createboltcard?card_name=card_5&enable=false&tx_max=1000&day_max=10000&uid_privacy=true&allow_neg_bal=true"'`
+-  `docker exec boltcard_main sh -c 'curl -H "Authorization: Bearer $INTERNAL_API_KEY" "localhost:9001/updateboltcard?card_name=card_5&enable=true&tx_max=100&day_max=1000"'`
+-  `docker exec boltcard_main sh -c 'curl -H "Authorization: Bearer $INTERNAL_API_KEY" "localhost:9001/wipeboltcard?card_name=card_5"'`
+-  `docker exec boltcard_main sh -c 'curl -H "Authorization: Bearer $INTERNAL_API_KEY" "localhost:9001/getboltcard?card_name=card_5"'`
+
+Do not publish port 9001 and do not reverse proxy it - anyone able to call
+`/createboltcard` can create a card and withdraw from your node.

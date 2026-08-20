@@ -19,6 +19,7 @@ cli/cli
 # vendor/
 
 # possible secrets
+.env
 tls.cert
 *.macaroon*
 Caddyfile

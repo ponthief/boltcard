@@ -20,8 +20,8 @@ func Wipeboltcard(w http.ResponseWriter, r *http.Request) {
 
 	// check if card_name has been given
 
-	if card_name == "" {
-		msg := "wipeboltcard: the card name must be set"
+	if !card_name_valid(card_name) {
+		msg := "wipeboltcard: the card name must be set and be at most 100 printable characters"
 		log.Warn(msg)
 		resp_err.Write_message(w, msg)
 		return
@@ -32,6 +32,7 @@ func Wipeboltcard(w http.ResponseWriter, r *http.Request) {
 	card_wipe_info_values, err := db.Wipe_card(card_name)
 	if err != nil {
 		log.Warn(err.Error())
+		resp_err.Write_message(w, "wipeboltcard: the card could not be wiped")
 		return
 	}
 
@@ -54,9 +55,11 @@ func Wipeboltcard(w http.ResponseWriter, r *http.Request) {
 		`"version": 1}`
 
 	// log the response
+	// the response holds the card keys, which are secrets, so they are not logged
 
 	log.WithFields(log.Fields{
-		"card_name": card_name, "response": jsonData}).Info("wipeboltcard API response")
+		"card_name": card_name,
+		"card_id":   card_wipe_info_values.Id}).Info("wipeboltcard API response")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

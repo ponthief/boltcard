@@ -12,6 +12,9 @@ INSERT INTO settings (name, value) VALUES ('LOG_LEVEL', 'DEBUG');
 INSERT INTO settings (name, value) VALUES ('AES_DECRYPT_KEY', '994de7f8156609a0effafbdb049337b1');
 INSERT INTO settings (name, value) VALUES ('HOST_DOMAIN', 'localhost:9000');
 INSERT INTO settings (name, value) VALUES ('FUNCTION_INTERNAL_API', 'ENABLE');
+-- test value only, generate your own key for a real deployment
+INSERT INTO settings (name, value) VALUES ('INTERNAL_API_KEY', 'test_internal_api_key_0123456789');
+INSERT INTO settings (name, value) VALUES ('INTERNAL_API_LISTEN', '127.0.0.1:9001');
 INSERT INTO settings (name, value) VALUES ('MIN_WITHDRAW_SATS', '1');
 INSERT INTO settings (name, value) VALUES ('MAX_WITHDRAW_SATS', '1000');
 

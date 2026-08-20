@@ -13,10 +13,13 @@ services:
       - DB_HOST=db
       - DB_USER=cardapp
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_PORT=5432    
+      - DB_PORT=5432
       - DB_NAME=card_db
-    expose: 
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    expose:
       - "9000"
+    # only the external API port is published
+    # the internal API is reached with `docker exec`, never published
     ports:
       - "8080:9000"
     volumes:

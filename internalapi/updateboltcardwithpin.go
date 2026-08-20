@@ -52,7 +52,22 @@ func Updateboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limit_valid(tx_max) || !limit_valid(day_max) {
+		msg := "updateboltcardwithpin: tx_max and day_max must not be negative"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
+
+	// an empty pin_number leaves the existing PIN in place
+
 	pin_number := r.URL.Query().Get("pin_number")
+	if pin_number != "" && !pin_valid(pin_number) {
+		msg := "updateboltcardwithpin: pin_number must be four digits"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
 
 	pin_limit_sats_str := r.URL.Query().Get("pin_limit_sats")
 	pin_limit_sats, err := strconv.Atoi(pin_limit_sats_str)
@@ -63,13 +78,27 @@ func Updateboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limit_valid(pin_limit_sats) {
+		msg := "updateboltcardwithpin: pin_limit_sats must not be negative"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
+
 	card_name := r.URL.Query().Get("card_name")
+	if !card_name_valid(card_name) {
+		msg := "updateboltcardwithpin: the card name must be set and be at most 100 printable characters"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
 
 	// check if card_name exists
 
 	card_count, err := db.Get_card_name_count(card_name)
 	if err != nil {
 		log.Warn(err.Error())
+		resp_err.Write_message(w, "updateboltcardwithpin: the card could not be read")
 		return
 	}
 
@@ -81,11 +110,12 @@ func Updateboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// log the request
+	// the PIN is a secret, so it is not logged
 
 	log.WithFields(log.Fields{
 		"card_name": card_name, "tx_max": tx_max, "day_max": day_max,
 		"enable": enable_flag, "enable_pin": pin_enable_flag,
-		"pin_number": pin_number, "pin_limit_sats": pin_limit_sats}).Info("updateboltcardwithpin API request")
+		"pin_limit_sats": pin_limit_sats}).Info("updateboltcardwithpin API request")
 
 	// update the card record
 
@@ -94,6 +124,7 @@ func Updateboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 			pin_enable_flag, pin_limit_sats)
 		if err != nil {
 			log.Warn(err.Error())
+			resp_err.Write_message(w, "updateboltcardwithpin: the card could not be updated")
 			return
 		}
 	}
@@ -103,6 +134,7 @@ func Updateboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 			pin_enable_flag, pin_number, pin_limit_sats)
 		if err != nil {
 			log.Warn(err.Error())
+			resp_err.Write_message(w, "updateboltcardwithpin: the card could not be updated")
 			return
 		}
 	}
