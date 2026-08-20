@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,17 @@ const default_internal_api_listen = "127.0.0.1:9001"
 const internal_api_rate_limit = 60
 const internal_api_rate_burst = 20
 
+// defaults for the external API, used when the setting is not set
+//
+// the per caller limits are well above what a point of sale or a card
+// programming app needs, so they turn away abuse rather than shaping traffic
+const default_external_rate_limit = 120
+const default_external_rate_burst = 40
+
+// the number of external requests handled at once is capped, because each one
+// opens database connections of its own
+const default_external_max_concurrent = 32
+
 // internal_api_listen_address returns the address for the internal API
 // listener. It defaults to the loopback interface, so that the internal API is
 // not exposed to the network by a host without a firewall.
@@ -33,6 +45,23 @@ func internal_api_listen_address() string {
 	}
 
 	return listen
+}
+
+// setting_int reads a whole number setting, falling back to a default value
+// when it is not set or cannot be read.
+func setting_int(setting_name string, default_value int) int {
+	value_str := strings.TrimSpace(db.Get_setting(setting_name))
+	if value_str == "" {
+		return default_value
+	}
+
+	value, err := strconv.Atoi(value_str)
+	if err != nil {
+		log.Warn("the ", setting_name, " setting is not a valid integer - using ", default_value)
+		return default_value
+	}
+
+	return value
 }
 
 func main() {
@@ -57,17 +86,46 @@ func main() {
 	var internal_router = mux.NewRouter()
 
 	// external API
+	//
+	// every function that reads the database is rate limited per caller and
+	// runs under a cap on how many requests are handled at once, so that a
+	// flood cannot use up the database connections and stop the service
+	//
+	// TRUSTED_PROXY_COUNT tells the service how many reverse proxies are in
+	// front of it, so that callers are told apart by their own address rather
+	// than all counted as the proxy
+
+	trusted_proxy_count := setting_int("TRUSTED_PROXY_COUNT", 0)
+
+	external_limiter := ratelimit.New(
+		setting_int("EXTERNAL_RATE_LIMIT_PER_MIN", default_external_rate_limit),
+		setting_int("EXTERNAL_RATE_BURST", default_external_rate_burst))
+	external_limiter.Key_func = ratelimit.Key_func_for_proxies(trusted_proxy_count)
+
+	external_concurrency := ratelimit.New_concurrency_limiter(
+		setting_int("EXTERNAL_MAX_CONCURRENT", default_external_max_concurrent))
+
+	limited := func(h http.HandlerFunc) http.HandlerFunc {
+		return external_concurrency.Middleware(external_limiter.Middleware(h))
+	}
+
+	if trusted_proxy_count == 0 {
+		log.Info("TRUSTED_PROXY_COUNT is not set - external callers are told ",
+			"apart by the address the service sees, which is the reverse proxy ",
+			"where one is used")
+	}
 
 	// ping
+	// not limited, so that health checks answer while the service is busy
 	external_router.Path("/ping").Methods("GET").HandlerFunc(external_ping)
 	// createboltcard
-	external_router.Path("/new").Methods("GET").HandlerFunc(new_card_request)
+	external_router.Path("/new").Methods("GET").HandlerFunc(limited(new_card_request))
 	// lnurlw for pos
-	external_router.Path("/ln").Methods("GET").HandlerFunc(lnurlw.Response)
-	external_router.Path("/cb").Methods("GET").HandlerFunc(lnurlw.Callback)
+	external_router.Path("/ln").Methods("GET").HandlerFunc(limited(lnurlw.Response))
+	external_router.Path("/cb").Methods("GET").HandlerFunc(limited(lnurlw.Callback))
 	// lnurlp for lightning address
-	external_router.Path("/.well-known/lnurlp/{name}").Methods("GET").HandlerFunc(lnurlp.Response)
-	external_router.Path("/lnurlp/{name}").Methods("GET").HandlerFunc(lnurlp.Callback)
+	external_router.Path("/.well-known/lnurlp/{name}").Methods("GET").HandlerFunc(limited(lnurlp.Response))
+	external_router.Path("/lnurlp/{name}").Methods("GET").HandlerFunc(limited(lnurlp.Callback))
 
 	// internal API
 	// this creates cards and reads or wipes card settings, so it is not to be

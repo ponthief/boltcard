@@ -129,3 +129,115 @@ func Test_client_key(t *testing.T) {
 		}
 	}
 }
+
+func Test_client_key_behind_proxies(t *testing.T) {
+	tests := []struct {
+		name                string
+		remote_addr         string
+		forwarded_for       string
+		trusted_proxy_count int
+		want                string
+	}{
+		{
+			name:                "no proxy trusted, header ignored",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "203.0.113.9",
+			trusted_proxy_count: 0,
+			want:                "10.0.0.1",
+		},
+		{
+			name:                "one proxy, caller taken from the header",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "203.0.113.9",
+			trusted_proxy_count: 1,
+			want:                "203.0.113.9",
+		},
+		{
+			name:                "one proxy, a caller supplied entry is not trusted",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "198.51.100.7, 203.0.113.9",
+			trusted_proxy_count: 1,
+			want:                "203.0.113.9",
+		},
+		{
+			name:                "two proxies",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "203.0.113.9, 10.0.0.2",
+			trusted_proxy_count: 2,
+			want:                "203.0.113.9",
+		},
+		{
+			name:                "two proxies, spoofed entries ahead of the caller",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "1.1.1.1, 2.2.2.2, 203.0.113.9, 10.0.0.2",
+			trusted_proxy_count: 2,
+			want:                "203.0.113.9",
+		},
+		{
+			name:                "fewer entries than proxies configured",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "203.0.113.9",
+			trusted_proxy_count: 3,
+			want:                "203.0.113.9",
+		},
+		{
+			name:                "no header from the proxy",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "",
+			trusted_proxy_count: 1,
+			want:                "10.0.0.1",
+		},
+		{
+			name:                "header value is not an address",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "not-an-address",
+			trusted_proxy_count: 1,
+			want:                "10.0.0.1",
+		},
+		{
+			name:                "ipv6 caller",
+			remote_addr:         "10.0.0.1:54321",
+			forwarded_for:       "2001:db8::1",
+			trusted_proxy_count: 1,
+			want:                "2001:db8::1",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/ln", nil)
+			r.RemoteAddr = test.remote_addr
+			if test.forwarded_for != "" {
+				r.Header.Set("X-Forwarded-For", test.forwarded_for)
+			}
+
+			if got := Client_key_behind_proxies(r, test.trusted_proxy_count); got != test.want {
+				t.Errorf("Client_key_behind_proxies() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// a caller must not be able to dodge the limiter by varying a header
+func Test_spoofed_forwarded_header_cannot_dodge_the_limiter(t *testing.T) {
+	l := New(60, 2)
+	l.Key_func = Key_func_for_proxies(0)
+
+	handler := l.Middleware(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	statuses := []int{}
+	for i := 0; i < 4; i++ {
+		r := httptest.NewRequest("GET", "/ln", nil)
+		r.RemoteAddr = "10.0.0.1:54321"
+		r.Header.Set("X-Forwarded-For", "203.0.113."+string(rune('1'+i)))
+		w := httptest.NewRecorder()
+		handler(w, r)
+		statuses = append(statuses, w.Code)
+	}
+
+	if statuses[2] != http.StatusTooManyRequests || statuses[3] != http.StatusTooManyRequests {
+		t.Errorf("statuses = %v, want the last two to be %d", statuses, http.StatusTooManyRequests)
+	}
+}

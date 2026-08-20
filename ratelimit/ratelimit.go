@@ -1,10 +1,15 @@
-// Package ratelimit provides a small in-memory per client token bucket rate
-// limiter, used to slow down brute force attempts against the internal API.
+// Package ratelimit limits how much work a caller can ask the service to do.
+//
+// It provides a per caller token bucket, used to turn away abuse of the public
+// endpoints and to slow brute force attempts against the internal API, and a
+// cap on how many requests are handled at once, which is what keeps a flood
+// from using up the database connections.
 package ratelimit
 
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +29,8 @@ type Limiter struct {
 	// tokens added per second
 	refill_rate float64
 	burst       float64
+	// Key_func identifies the client a request is counted against
+	Key_func func(*http.Request) string
 	// now is a variable so that tests do not need to sleep
 	now func() time.Time
 }
@@ -46,6 +53,7 @@ func New(requests_per_minute int, burst int) *Limiter {
 		buckets:     make(map[string]*bucket),
 		refill_rate: float64(requests_per_minute) / 60.0,
 		burst:       float64(burst),
+		Key_func:    Client_key,
 		now:         time.Now,
 	}
 }
@@ -97,7 +105,7 @@ func (l *Limiter) prune(now time.Time) {
 // with HTTP 429 instead of reaching the handler.
 func (l *Limiter) Middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		client := Client_key(r)
+		client := l.Key_func(r)
 
 		if !l.Allow(client) {
 			log.WithFields(log.Fields{
@@ -122,4 +130,50 @@ func Client_key(r *http.Request) string {
 	}
 
 	return host
+}
+
+// Client_key_behind_proxies identifies the caller of a request that arrives
+// through trusted_proxy_count reverse proxies.
+//
+// Each proxy appends the address it received the request from to
+// X-Forwarded-For, so with one trusted proxy the last entry is the caller,
+// with two the entry before it, and so on. Only that many entries are trusted;
+// anything the caller put in the header itself is ignored, as is the whole
+// header when no proxy is configured.
+func Client_key_behind_proxies(r *http.Request, trusted_proxy_count int) string {
+	if trusted_proxy_count < 1 {
+		return Client_key(r)
+	}
+
+	forwarded_for := r.Header.Get("X-Forwarded-For")
+	if forwarded_for == "" {
+		return Client_key(r)
+	}
+
+	addresses := strings.Split(forwarded_for, ",")
+
+	index := len(addresses) - trusted_proxy_count
+	if index < 0 {
+		// fewer entries than expected, so the first is the closest to the
+		// caller that can be relied on
+		index = 0
+	}
+
+	address := strings.TrimSpace(addresses[index])
+
+	// an entry that is not an address is not used, so that a header value
+	// cannot invent limiter keys
+	if net.ParseIP(address) == nil {
+		return Client_key(r)
+	}
+
+	return address
+}
+
+// Key_func_for_proxies returns a limiter key function for a service behind
+// trusted_proxy_count reverse proxies.
+func Key_func_for_proxies(trusted_proxy_count int) func(*http.Request) string {
+	return func(r *http.Request) string {
+		return Client_key_behind_proxies(r, trusted_proxy_count)
+	}
 }

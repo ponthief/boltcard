@@ -27,3 +27,25 @@ Please do not disclose any possible security vulnerabilities to third parties.
   card tap rather than being guessed in bulk
 - payments and notifications run in their own goroutines, each of which recovers
   from a panic, so an unreachable lightning node cannot stop the service
+
+## Rate limiting
+
+The public endpoints are limited in two ways, both adjustable in the
+[settings](docs/SETTINGS.md):
+
+- each caller may make `EXTERNAL_RATE_LIMIT_PER_MIN` requests a minute, bursting
+  to `EXTERNAL_RATE_BURST`, and is answered with HTTP 429 above that
+- `EXTERNAL_MAX_CONCURRENT` requests are handled at once, and further requests
+  are answered with HTTP 503 rather than queueing - this is the limit that keeps
+  a flood from using up the connections the database allows, since a flood can
+  come from many addresses
+
+Set `TRUSTED_PROXY_COUNT` to the number of reverse proxies in front of the
+service, so that callers are told apart by their own address rather than all
+being counted as the proxy. It is `1` for the supplied docker install, where
+Caddy is in front. Only that many entries at the end of `X-Forwarded-For` are
+trusted, and the header is ignored entirely when the setting is empty or `0`, so
+a caller cannot dodge the limiter by sending a header of its own.
+
+`/ping` is not limited, so that health checks still answer while the service is
+busy.
