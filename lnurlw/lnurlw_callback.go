@@ -15,9 +15,15 @@ import (
 	"github.com/boltcard/boltcard/lndhub"
 	ntfy "github.com/boltcard/boltcard/ntfy"
 	"github.com/boltcard/boltcard/resp_err"
+	"github.com/boltcard/boltcard/safego"
 	decodepay "github.com/fiatjaf/ln-decodepay"
 	log "github.com/sirupsen/logrus"
 )
+
+// how long the card holder has to approve a payment, and how often the answer
+// is looked for
+const approval_period = 1 * time.Minute
+const approval_poll_interval = 2 * time.Second
 
 type LndhubAuthRequest struct {
 	Login    string `json:"login"`
@@ -169,41 +175,23 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 	// the payment was claimed by Authorize_payment above, so it is not
 	// claimed again here
 
-	go ntfy.SendNtfycation(p.Card_payment_id, invoice_sats)
-	responseTimeout := 1 * time.Minute
-	ntfyStatus := false
-	deadline := time.Now().Add(responseTimeout)
-	for time.Now().Before(deadline) {
-		ntfyStatus, err = db.Check_payment_ntfy(p.Card_payment_id)
-		//log.Info("Notif status: ", ntfyStatus)
-		if err != nil {
-			log.Warn(err.Error())
-		}
-		if ntfyStatus {
-			break
-		}
-		time.Sleep(5 * time.Second)
-	}
-
+	// ask the card holder to approve the payment, where that is switched on
+	//
 	// https://github.com/fiatjaf/lnurl-rfc/blob/luds/03.md
 	//
 	// LN SERVICE sends a {"status": "OK"} or
 	// {"status": "ERROR", "reason": "error details..."}
 	//  JSON response and then attempts to pay the invoices asynchronously.
+	//
+	// so the response is sent now and the waiting is done in its own
+	// goroutine - waiting here would hold the request open past the write
+	// timeout of the server and would hold one of the places for handling
+	// requests at once for the whole approval period
 
-	if ntfyStatus {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("payment approved")
-		go lnd.PayInvoice(p.Card_payment_id, param_pr)
+	if db.Get_setting("FUNCTION_NTFY") == "ENABLE" {
+		go await_approval(p.Card_payment_id, invoice_sats, param_pr)
 	} else {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("payment rejected")
-
-		// no payment is sent, so the withdraw request is released rather than
-		// left claimed - a claimed request counts towards the daily limit and
-		// the card balance
-		err = db.Release_payment(p.Card_payment_id, "payment was not approved")
-		if err != nil {
-			log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
-		}
+		go lnd.PayInvoice(p.Card_payment_id, param_pr)
 	}
 
 	log.Debug("sending 'status OK' response")
@@ -212,6 +200,70 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 	w.WriteHeader(http.StatusOK)
 	jsonData := []byte(`{"status":"OK"}`)
 	w.Write(jsonData)
+}
+
+// await_approval asks the card holder to approve a claimed payment and pays it
+// once they do.
+//
+// A payment that is rejected, or that is not answered within the approval
+// period, is released so that it counts towards neither the daily limit nor the
+// card balance. The claim stays in place either way, so the card tap is spent
+// and the withdraw request cannot be used again.
+func await_approval(card_payment_id int, invoice_sats int, param_pr string) {
+
+	defer safego.Recover("await_approval")
+
+	// the notification carries a single use token rather than an API key
+	token, err := db.Create_payment_ntfy_token(card_payment_id)
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
+		release(card_payment_id, "approval could not be requested")
+		return
+	}
+
+	err = ntfy.SendNtfycation(card_payment_id, invoice_sats, token)
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
+		release(card_payment_id, "approval could not be requested")
+		return
+	}
+
+	deadline := time.Now().Add(approval_period)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(approval_poll_interval)
+
+		answered, approved, err := db.Get_payment_approval(card_payment_id)
+		if err != nil {
+			log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
+			continue
+		}
+
+		if !answered {
+			continue
+		}
+
+		if approved {
+			log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Info("payment approved")
+			lnd.PayInvoice(card_payment_id, param_pr)
+			return
+		}
+
+		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Info("payment rejected")
+		release(card_payment_id, "payment was rejected")
+		return
+	}
+
+	log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Info("payment approval timed out")
+	release(card_payment_id, "payment was not approved in time")
+}
+
+// release marks a claimed payment that will not be sent as failed
+func release(card_payment_id int, reason string) {
+	err := db.Release_payment(card_payment_id, reason)
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
+	}
 }
 
 func Callback(w http.ResponseWriter, req *http.Request) {

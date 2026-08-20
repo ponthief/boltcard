@@ -61,6 +61,11 @@ Here are the descriptions of values available to use in the `settings` table:
 | EXTERNAL_RATE_LIMIT_PER_MIN | 120 | requests per minute allowed per caller on the public endpoints |
 | EXTERNAL_RATE_BURST | 40 | requests a caller may make at once on the public endpoints |
 | EXTERNAL_MAX_CONCURRENT | 32 | public requests handled at once, which bounds the database connections in use |
+| FUNCTION_NTFY | DISABLE | system level switch for asking the card holder to approve each payment by ntfy notification |
+| NTFY_URL | http://localhost:2586 | the ntfy server to publish approval requests to |
+| NTFY_TOPIC | | the ntfy topic to publish approval requests to - approval requests are not sent without it |
+| NTFY_USER | | username for the ntfy server, where it needs one |
+| NTFY_PASSWORD | | password for the ntfy server, where it needs one |
 | SETTING_CACHE_SEC | 10 | seconds a setting value is reused before it is read from the database again - a change to a setting takes up to this long to come into effect, `0` reads every time |
 | SENDGRID_API_KEY      | | User API Key from SendGrid.com             |
 | SENDGRID_EMAIL_SENDER | | Single Sender email address verified by SendGrid |

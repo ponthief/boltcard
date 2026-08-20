@@ -27,6 +27,9 @@ Please do not disclose any possible security vulnerabilities to third parties.
   card tap rather than being guessed in bulk
 - payments and notifications run in their own goroutines, each of which recovers
   from a panic, so an unreachable lightning node cannot stop the service
+- where payments are held for approval by notification, the approval link
+  carries a single use token for that one payment rather than an API key, see
+  [payment approval](docs/NTFY_APPROVAL.md)
 
 ## Rate limiting
 
