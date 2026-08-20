@@ -169,12 +169,7 @@ func main() {
 	internal_router.Path("/updateboltcardwithpin").Methods("GET").HandlerFunc(protected(internalapi.Updateboltcardwithpin))
 	internal_router.Path("/wipeboltcard").Methods("GET").HandlerFunc(protected(internalapi.Wipeboltcard))
 	internal_router.Path("/getboltcard").Methods("GET").HandlerFunc(protected(internalapi.Getboltcard))
-	internal_router.Path("/ping").Methods("GET").HandlerFunc(internalapi.Internal_ping)
-	internal_router.Path("/createboltcard").Methods("GET").HandlerFunc(internalapi.Createboltcard)
-	internal_router.Path("/updateboltcard").Methods("GET").HandlerFunc(internalapi.Updateboltcard)
-	internal_router.Path("/updateboltcardpayment").Methods("GET").HandlerFunc(internalapi.Updateboltcardpayment)
-	internal_router.Path("/wipeboltcard").Methods("GET").HandlerFunc(internalapi.Wipeboltcard)
-	internal_router.Path("/getboltcard").Methods("GET").HandlerFunc(internalapi.Getboltcard)
+	internal_router.Path("/updateboltcardpayment").Methods("GET").HandlerFunc(protected(internalapi.Updateboltcardpayment))
 
 	port := db.Get_setting("HOST_PORT")
 	if port == "" {

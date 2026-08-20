@@ -166,14 +166,9 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 		return
 	}
 
-	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("paying invoice")
-	// update paid_flag so we only attempt payment once
-	err = db.Update_payment_paid(p.Card_payment_id)
-	if err != nil {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
-		resp_err.Write(w)
-		return
-	}
+	// the payment was claimed by Authorize_payment above, so it is not
+	// claimed again here
+
 	go ntfy.SendNtfycation(p.Card_payment_id, invoice_sats)
 	responseTimeout := 1 * time.Minute
 	ntfyStatus := false
@@ -197,10 +192,18 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 	//  JSON response and then attempts to pay the invoices asynchronously.
 
 	if ntfyStatus {
-		log.Info("Payment Approved")
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("payment approved")
 		go lnd.PayInvoice(p.Card_payment_id, param_pr)
 	} else {
-		log.Warn("Payment Rejected")
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("payment rejected")
+
+		// no payment is sent, so the withdraw request is released rather than
+		// left claimed - a claimed request counts towards the daily limit and
+		// the card balance
+		err = db.Release_payment(p.Card_payment_id, "payment was not approved")
+		if err != nil {
+			log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		}
 	}
 
 	log.Debug("sending 'status OK' response")

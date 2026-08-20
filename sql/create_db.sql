@@ -47,6 +47,8 @@ CREATE TABLE card_payments (
 	payment_status VARCHAR(100) NOT NULL DEFAULT '',
 	failure_reason VARCHAR(100) NOT NULL DEFAULT '',
 	payment_status_time TIMESTAMPTZ,
+	ntfy_flag CHAR(1) NOT NULL DEFAULT 'N',
+	ntfy_ts TIMESTAMPTZ,
 	PRIMARY KEY(card_payment_id),
 	CONSTRAINT fk_card FOREIGN KEY(card_id) REFERENCES cards(card_id)
 );
