@@ -206,13 +206,13 @@ func Monitor_invoice_state(r_hash []byte) {
 		log.WithFields(log.Fields{"r_hash": hex.EncodeToString(r_hash)}).Warn(err)
 		return
 	}
-    go nostrfy.SendNostrfication(card_id, c.Card_name, db.NostrRec)
+	go nostrfy.SendNostrfication(card_id, c.Card_name, db.NostrRec)
 	if c.Email_enable != "Y" {
 		log.Debug("email is not enabled for the card")
 		return
 	}
 
-	//go email.Send_balance_email(c.Email_address, card_id)	
+	//go email.Send_balance_email(c.Email_address, card_id)
 	return
 }
 
@@ -331,13 +331,13 @@ func PayInvoice(card_payment_id int, invoice string) {
 	if err != nil {
 		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
 		return
-	}    
+	}
 
 	go nostrfy.SendNostrfication(card_id, c.Card_name, db.NostrPay)
 	if c.Email_enable != "Y" {
 		log.Debug("email is not enabled for the card")
 		return
-	}    
-	go email.Send_balance_email(c.Email_address, card_id)	
+	}
+	go email.Send_balance_email(c.Email_address, card_id)
 	return
 }

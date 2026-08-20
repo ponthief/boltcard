@@ -34,9 +34,6 @@ type Card struct {
 	Pin_number                 string
 	Pin_limit_sats             int
 	Nostr_priv_key             string
-	Pin_enable                 string
-	Pin_number                 string
-	Pin_limit_sats             int
 }
 
 type Payment struct {
@@ -724,6 +721,41 @@ func Fail_payment(card_payment_id int, failure_reason string) error {
 	sqlStatement := `UPDATE card_payments SET paid_flag = 'Y', amount_msats = NULL,` +
 		` payment_status = 'FAILED', failure_reason = $2, payment_status_time = NOW()` +
 		` WHERE card_payment_id = $1 AND paid_flag = 'N';`
+	res, err := db.Exec(sqlStatement, card_payment_id, failure_reason)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return errors.New("not one card_payment record updated")
+	}
+
+	return nil
+}
+
+// Release_payment marks a payment that was claimed but will not be sent as
+// failed, and clears its amount so that it counts towards neither the daily
+// total nor the card balance.
+//
+// The claim is left in place, so the withdraw request is still spent and cannot
+// be retried. Only a payment the node has not reported on is released.
+//
+// This is used where a payment is authorised and then not sent after all, such
+// as a payment the card holder does not approve.
+func Release_payment(card_payment_id int, failure_reason string) error {
+
+	db, err := open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	sqlStatement := `UPDATE card_payments SET amount_msats = NULL,` +
+		` payment_status = 'FAILED', failure_reason = $2, payment_status_time = NOW()` +
+		` WHERE card_payment_id = $1 AND payment_status = '';`
 	res, err := db.Exec(sqlStatement, card_payment_id, failure_reason)
 	if err != nil {
 		return err
