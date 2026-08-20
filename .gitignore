@@ -7,6 +7,7 @@
 boltcard
 createboltcard/createboltcard
 wipeboltcard/wipeboltcard
+cli/cli
 
 # Test binary, built with `go test -c`
 *.test
@@ -18,6 +19,7 @@ wipeboltcard/wipeboltcard
 # vendor/
 
 # possible secrets
+.env
 tls.cert
 *.macaroon*
 Caddyfile

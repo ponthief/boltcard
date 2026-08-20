@@ -3,6 +3,29 @@
 The database connection settings are in the system environment variables.  
 Other settings are in the database in a `settings` table. 
 
+## Upgrading an existing install
+
+A database created by an earlier version does not hold the newer settings rows.
+Every setting falls back to a working default when its row is missing, so the
+service runs either way, but the rows have to exist before a value can be set.
+
+To add the missing rows without touching any value already set:
+
+```
+$ psql card_db -f sql/migrate_settings.sql
+```
+
+It is safe to run against a live database and safe to run more than once. It
+lists the settings still holding no value when it finishes.
+
+After upgrading, review these in particular:
+
+- `INTERNAL_API_KEY` - the internal API stays closed until it is set, see
+  [the internal API](INTERNAL_API.md)
+- `TRUSTED_PROXY_COUNT` - set it to `1` when a reverse proxy such as Caddy is in
+  front of the service, so that rate limiting counts each caller rather than the
+  proxy
+
 Here are the descriptions of values available to use in the `settings` table:
 
 | Name | Value | Description |
@@ -32,5 +55,13 @@ Here are the descriptions of values available to use in the `settings` table:
 | FUNCTION_LNDHUB | DISABLE | system level switch for using LNDHUB in place of LND |
 | LNDHUB_URL | | URL for the LNDHUB service |
 | FUNCTION_INTERNAL_API | DISABLE | system level switch for activating the internal API |
+| INTERNAL_API_KEY | | shared secret required by every internal API call - see [the internal API](INTERNAL_API.md) |
+| INTERNAL_API_LISTEN | 127.0.0.1:9001 | address the internal API listens on - defaults to the loopback interface |
+| TRUSTED_PROXY_COUNT | 1 | number of reverse proxies in front of the service, so that rate limiting counts each caller rather than the proxy - `1` for the supplied docker install, empty or `0` when nothing is in front |
+| EXTERNAL_RATE_LIMIT_PER_MIN | 120 | requests per minute allowed per caller on the public endpoints |
+| EXTERNAL_RATE_BURST | 40 | requests a caller may make at once on the public endpoints |
+| EXTERNAL_MAX_CONCURRENT | 32 | public requests handled at once, which bounds the database connections in use |
+| SETTING_CACHE_SEC | 10 | seconds a setting value is reused before it is read from the database again - a change to a setting takes up to this long to come into effect, `0` reads every time |
 | SENDGRID_API_KEY      | | User API Key from SendGrid.com             |
 | SENDGRID_EMAIL_SENDER | | Single Sender email address verified by SendGrid |
+| LN_INVOICE_EXPIRY_SEC | 3600 | LN invoice's expiry time in seconds |

@@ -43,8 +43,10 @@ type NewCardResponse struct {
 
 func new_card_request(w http.ResponseWriter, req *http.Request) {
 
-	url := req.URL.RequestURI()
-	log.Debug("new_card url: ", url)
+	// the request URL holds the one time code, which is a secret,
+	// so the path is logged without the query string
+
+	log.Debug("new_card path: ", req.URL.Path)
 
 	params_a, ok := req.URL.Query()["a"]
 	if !ok || len(params_a[0]) < 1 {

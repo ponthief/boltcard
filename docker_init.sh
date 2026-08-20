@@ -19,6 +19,15 @@ sed -i "s/^DB_PASSWORD=.*$/DB_PASSWORD=$PASSWORD/g" .env
 decrypt_key=$(hexdump -vn16 -e'4/4 "%08x" 1 "\n"' /dev/random)
 echo $decrypt_key
 
+# shared secret for the internal API - keep this private
+internal_api_key=$(hexdump -vn32 -e'8/4 "%08x" 1 "\n"' /dev/random)
+if grep -q '^INTERNAL_API_KEY=' .env; then
+    sed -i "s/^INTERNAL_API_KEY=.*$/INTERNAL_API_KEY=$internal_api_key/g" .env
+else
+    echo "INTERNAL_API_KEY=$internal_api_key" >> .env
+fi
+echo "internal API key written to .env"
+
 sed -i "s/[(]'LOG_LEVEL'[^)]*[)]/(\'LOG_LEVEL\', \'DEBUG\')/" sql/settings.sql
 sed -i "s/[(]'AES_DECRYPT_KEY'[^)]*[)]/(\'AES_DECRYPT_KEY\', \'$decrypt_key\')/" sql/settings.sql
 sed -i "s/[(]'MIN_WITHDRAW_SATS'[^)]*[)]/(\'MIN_WITHDRAW_SATS\', \'1\')/" sql/settings.sql
@@ -32,3 +41,7 @@ sed -i "s/[(]'FEE_LIMIT_PERCENT'[^)]*[)]/(\'FEE_LIMIT_PERCENT\', \'0.5\')/" sql/
 sed -i "s/[(]'FUNCTION_LNURLW'[^)]*[)]/(\'FUNCTION_LNURLW\', \'ENABLE\')/" sql/settings.sql
 sed -i "s/[(]'FUNCTION_LNURLP'[^)]*[)]/(\'FUNCTION_LNURLP\', \'DISABLE\')/" sql/settings.sql
 sed -i "s/[(]'FUNCTION_EMAIL'[^)]*[)]/(\'FUNCTION_EMAIL\', \'DISABLE\')/" sql/settings.sql
+sed -i "s/[(]'LN_INVOICE_EXPIRY_SEC'[^)]*[)]/(\'LN_INVOICE_EXPIRY_SEC\', \'3600\')/" sql/settings.sql
+# this install puts Caddy in front of the service, so one proxy is trusted for
+# the forwarded address used to tell callers apart when rate limiting
+sed -i "s/[(]'TRUSTED_PROXY_COUNT'[^)]*[)]/(\'TRUSTED_PROXY_COUNT\', \'1\')/" sql/settings.sql

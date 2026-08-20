@@ -43,13 +43,27 @@ func Updateboltcard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limit_valid(tx_max) || !limit_valid(day_max) {
+		msg := "updateboltcard: tx_max and day_max must not be negative"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
+
 	card_name := r.URL.Query().Get("card_name")
+	if !card_name_valid(card_name) {
+		msg := "updateboltcard: the card name must be set and be at most 100 printable characters"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
 
 	// check if card_name exists
 
 	card_count, err := db.Get_card_name_count(card_name)
 	if err != nil {
 		log.Warn(err.Error())
+		resp_err.Write_message(w, "updateboltcard: the card could not be read")
 		return
 	}
 
@@ -71,6 +85,7 @@ func Updateboltcard(w http.ResponseWriter, r *http.Request) {
 	err = db.Update_card(card_name, enable_flag, tx_max, day_max)
 	if err != nil {
 		log.Warn(err.Error())
+		resp_err.Write_message(w, "updateboltcard: the card could not be updated")
 		return
 	}
 

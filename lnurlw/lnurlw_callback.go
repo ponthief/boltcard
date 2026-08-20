@@ -2,16 +2,19 @@ package lnurlw
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
-    "time"
+	"time"
+
 	"github.com/boltcard/boltcard/db"
+	"github.com/boltcard/boltcard/invoice"
 	"github.com/boltcard/boltcard/lnd"
 	"github.com/boltcard/boltcard/lndhub"
-	"github.com/boltcard/boltcard/resp_err"
 	ntfy "github.com/boltcard/boltcard/ntfy"
+	"github.com/boltcard/boltcard/resp_err"
 	decodepay "github.com/fiatjaf/ln-decodepay"
 	log "github.com/sirupsen/logrus"
 )
@@ -39,17 +42,7 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 		return
 	}
 
-	// check amount limits
 	invoice_sats := int(bolt11.MSatoshi / 1000)
-
-	//check the tx limit
-	if invoice_sats > c.Tx_limit_sats {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("invoice_sats: ", invoice_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("tx_limit_sats: ", c.Tx_limit_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("over tx_limit_sats!")
-		resp_err.Write(w)
-		return
-	}
 
 	//lndhub.auth API call
 	//the login JSON is held in the Card_name field
@@ -57,13 +50,13 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 	card_name_parts := strings.Split(c.Card_name, ":")
 
 	if len(card_name_parts) != 2 {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("login:password not found")
 		resp_err.Write(w)
 		return
 	}
 
 	if len(card_name_parts[0]) != 20 || len(card_name_parts[1]) != 20 {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("login:password badly formed")
 		resp_err.Write(w)
 		return
 	}
@@ -73,7 +66,6 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 	lhAuthRequest.Password = card_name_parts[1]
 
 	authReq, err := json.Marshal(lhAuthRequest)
-	log.Info(string(authReq))
 
 	req_auth, err := http.NewRequest("POST", lndhub_url+"/auth", bytes.NewBuffer(authReq))
 	if err != nil {
@@ -102,6 +94,12 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 		return
 	}
 
+	// the response body holds the lndhub access and refresh tokens,
+	// which are secrets, so it is not logged
+
+	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id,
+		"status": resp_auth.StatusCode}).Debug("lndhub auth response")
+
 	var auth_keys LndhubAuthResponse
 
 	err = json.Unmarshal([]byte(resp_auth_bytes), &auth_keys)
@@ -111,10 +109,19 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 		return
 	}
 
-	// update paid_flag so we only attempt payment once
-	err = db.Update_payment_paid(p.Card_payment_id)
+	// check the payment rules and claim the payment, so that concurrent
+	// callbacks for one withdraw request cannot each send a payment
+	// lndhub payments are limited per transaction only, as before
+	authorized, refusal, err := db.Authorize_payment(p.Card_payment_id, invoice_sats, false)
 	if err != nil {
 		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		resp_err.Write(w)
+		return
+	}
+
+	if !authorized {
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id,
+			"invoice_sats": invoice_sats}).Info("payment not authorized - ", refusal)
 		resp_err.Write(w)
 		return
 	}
@@ -125,7 +132,7 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 	// {"status": "ERROR", "reason": "error details..."}
 	//  JSON response and then attempts to pay the invoices asynchronously.
 
-	go lndhub.PayInvoice(p.Card_payment_id, param_pr, int(bolt11.MSatoshi/1000), card_name_parts[0], auth_keys.AccessToken)
+	go lndhub.PayInvoice(p.Card_payment_id, param_pr, invoice_sats, card_name_parts[0], auth_keys.AccessToken)
 
 	log.Debug("sending 'status OK' response")
 
@@ -137,58 +144,29 @@ func lndhub_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt1
 
 func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, param_pr string) {
 
-	// check amount limits
 	invoice_sats := int(bolt11.MSatoshi / 1000)
 
-	day_total_sats, err := db.Get_card_totals(p.Card_id)
+	// check the transaction limit, the daily limit and the card balance, and
+	// claim the payment, as one atomic step
+	//
+	// doing this in one step is what stops concurrent callbacks for a single
+	// withdraw request each sending a payment, and stops parallel card taps
+	// each being measured against the same daily total or balance
+	authorized, refusal, err := db.Authorize_payment(p.Card_payment_id, invoice_sats, true)
 	if err != nil {
 		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
 		resp_err.Write(w)
 		return
 	}
 
-	c, err := db.Get_card_from_card_id(p.Card_id)
-	if err != nil {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+	if !authorized {
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id,
+			"invoice_sats": invoice_sats}).Info("payment not authorized - ", refusal)
 		resp_err.Write(w)
 		return
 	}
 
-	if invoice_sats > c.Tx_limit_sats {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("invoice_sats: ", invoice_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("tx_limit_sats: ", c.Tx_limit_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("over tx_limit_sats!")
-		resp_err.Write(w)
-		return
-	}
-
-	if day_total_sats+invoice_sats > c.Day_limit_sats {
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("invoice_sats: ", invoice_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("day_total_sats: ", day_total_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("day_limit_sats: ", c.Day_limit_sats)
-		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("over day_limit_sats!")
-		resp_err.Write(w)
-		return
-	}
-
-	// check the card balance if marked as 'must stay above zero' (default)
-	//  i.e. cards.allow_negative_balance == 'N'
-	if c.Allow_negative_balance != "Y" {
-		card_total, err := db.Get_card_total_sats(p.Card_id)
-		if err != nil {
-			log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
-			resp_err.Write(w)
-			return
-		}
-
-		if card_total-invoice_sats < 0 {
-			log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("not enough balance")
-			resp_err.Write(w)
-			return
-		}
-	}
-
-	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("paying invoice")    
+	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("paying invoice")
 	// update paid_flag so we only attempt payment once
 	err = db.Update_payment_paid(p.Card_payment_id)
 	if err != nil {
@@ -196,35 +174,34 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 		resp_err.Write(w)
 		return
 	}
-    go ntfy.SendNtfycation(p.Card_payment_id, invoice_sats)		
+	go ntfy.SendNtfycation(p.Card_payment_id, invoice_sats)
 	responseTimeout := 1 * time.Minute
-    ntfyStatus := false
+	ntfyStatus := false
 	deadline := time.Now().Add(responseTimeout)
 	for time.Now().Before(deadline) {
-		ntfyStatus,err = db.Check_payment_ntfy(p.Card_payment_id)
-	    //log.Info("Notif status: ", ntfyStatus)
+		ntfyStatus, err = db.Check_payment_ntfy(p.Card_payment_id)
+		//log.Info("Notif status: ", ntfyStatus)
 		if err != nil {
 			log.Warn(err.Error())
 		}
-		if (ntfyStatus) {
+		if ntfyStatus {
 			break
 		}
-        time.Sleep(5 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
-	
+
 	// https://github.com/fiatjaf/lnurl-rfc/blob/luds/03.md
 	//
 	// LN SERVICE sends a {"status": "OK"} or
 	// {"status": "ERROR", "reason": "error details..."}
 	//  JSON response and then attempts to pay the invoices asynchronously.
 
-	if (ntfyStatus) {
-		log.Info("Payment Approved")		
-	    go lnd.PayInvoice(p.Card_payment_id, param_pr)
+	if ntfyStatus {
+		log.Info("Payment Approved")
+		go lnd.PayInvoice(p.Card_payment_id, param_pr)
 	} else {
 		log.Warn("Payment Rejected")
 	}
-    
 
 	log.Debug("sending 'status OK' response")
 
@@ -243,23 +220,22 @@ func Callback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	url := req.URL.RequestURI()
-	log.WithFields(log.Fields{"url": url}).Debug("cb request")
+	// the query string holds k1 and any PIN, so it is not logged
 
-	// check k1 value
-	params_k1, ok := req.URL.Query()["k1"]
+	log.WithFields(log.Fields{"path": req.URL.Path}).Debug("cb request")
 
-	if !ok || len(params_k1[0]) < 1 {
-		log.WithFields(log.Fields{"url": url}).Debug("k1 not found")
+	// get k1 value
+	param_k1 := req.URL.Query().Get("k1")
+
+	if param_k1 == "" {
+		log.Debug("k1 not found")
 		resp_err.Write(w)
 		return
 	}
 
-	param_k1 := params_k1[0]
-
 	p, err := db.Get_payment_k1(param_k1)
 	if err != nil {
-		log.WithFields(log.Fields{"url": url, "k1": param_k1}).Warn(err)
+		log.Warn("no withdraw request found for the k1 given: ", err)
 		resp_err.Write(w)
 		return
 	}
@@ -284,15 +260,20 @@ func Callback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	params_pr, ok := req.URL.Query()["pr"]
-	if !ok || len(params_pr[0]) < 1 {
+	// get the payment request
+	param_pr := req.URL.Query().Get("pr")
+	if param_pr == "" {
 		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("pr field not found")
 		resp_err.Write(w)
 		return
 	}
 
-	param_pr := params_pr[0]
-	bolt11, _ := decodepay.Decodepay(param_pr)
+	bolt11, err := invoice.Decode(param_pr)
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		resp_err.Write(w)
+		return
+	}
 
 	// record the lightning invoice
 	err = db.Update_payment_invoice(p.Card_payment_id, param_pr, bolt11.MSatoshi)
@@ -303,6 +284,35 @@ func Callback(w http.ResponseWriter, req *http.Request) {
 	}
 
 	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Debug("checking payment rules")
+
+	// get the pin if it has been passed in
+	param_pin := req.URL.Query().Get("pin")
+
+	c, err := db.Get_card_from_card_id(p.Card_id)
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		resp_err.Write(w)
+		return
+	}
+
+	// check the pin if needed
+	//
+	// a wrong PIN consumes the withdraw request, so that a PIN can only be
+	// tried once per card tap rather than being guessed in bulk
+	// the comparison is constant time so that it gives nothing away
+	if c.Pin_enable == "Y" && int(bolt11.MSatoshi/1000) >= c.Pin_limit_sats &&
+		subtle.ConstantTimeCompare([]byte(c.Pin_number), []byte(param_pin)) != 1 {
+
+		log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn("incorrect pin provided")
+
+		err = db.Fail_payment(p.Card_payment_id, "incorrect pin provided")
+		if err != nil {
+			log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Warn(err)
+		}
+
+		resp_err.Write(w)
+		return
+	}
 
 	// check if we are only sending funds to a defined test node
 	testnode := db.Get_setting("LN_TESTNODE")

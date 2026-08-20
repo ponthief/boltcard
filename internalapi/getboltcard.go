@@ -17,6 +17,12 @@ func Getboltcard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	card_name := r.URL.Query().Get("card_name")
+	if !card_name_valid(card_name) {
+		msg := "getboltcard: the card name must be set and be at most 100 printable characters"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
 
 	// log the request
 

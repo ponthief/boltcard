@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/boltcard/boltcard/db"
+	"github.com/boltcard/boltcard/safego"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -18,6 +19,8 @@ type LndhubPayInvoiceRequest struct {
 }
 
 func PayInvoice(cardPaymentId int, invoice string, amountSats int, loginId string, accessToken string) {
+
+	defer safego.Recover("lndhub.PayInvoice")
 
 	lndhub_url := db.Get_setting("LNDHUB_URL")
 

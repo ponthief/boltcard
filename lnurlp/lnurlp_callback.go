@@ -2,13 +2,15 @@ package lnurlp
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"strconv"
+
 	"github.com/boltcard/boltcard/db"
 	"github.com/boltcard/boltcard/lnd"
 	"github.com/boltcard/boltcard/resp_err"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
-	"net/http"
-	"strconv"
 )
 
 func Callback(w http.ResponseWriter, r *http.Request) {
@@ -20,9 +22,9 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	amount := r.URL.Query().Get("amount")
 
-	card_id, err := db.Get_card_id_for_name(name)
+	card_id, err := db.Get_card_id_for_name_lnurlp(name)
 	if err != nil {
-		log.Info("card name not found")
+		log.Info("no card with lnurlp enabled for that name")
 		resp_err.Write(w)
 		return
 	}
@@ -50,9 +52,24 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// the amount must be within the range offered in the lnurlp response,
+	// so that the invoice is for a whole number of satoshis and the receipt
+	// records the amount the invoice was actually made out for
+	if amount_msat < Min_sendable_msat || amount_msat > Max_sendable_msat {
+		log.WithFields(log.Fields{"amount_msat": amount_msat}).Warn("amount is out of range")
+		resp_err.Write(w)
+		return
+	}
+
+	if amount_msat%1000 != 0 {
+		log.WithFields(log.Fields{"amount_msat": amount_msat}).Warn("amount is not a whole number of sats")
+		resp_err.Write(w)
+		return
+	}
+
 	amount_sat := amount_msat / 1000
 
-	metadata := "[[\"text/identifier\",\"" + name + "@" + domain + "\"],[\"text/plain\",\"BiTaurus Pay\"]]"
+	metadata := metadata_json(name, domain)
 	pr, r_hash, err := lnd.Add_invoice(amount_sat, metadata)
 	if err != nil {
 		log.Warn("could not add_invoice")
@@ -71,11 +88,18 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 
 	log.Debug("sending 'status OK' response")
 
-	jsonData := []byte(`{` +
-		`"status":"OK",` +
-		`"routes":[],` +
-		`"pr":"` + pr + `"` +
-		`}`)
+	response := make(map[string]interface{})
+
+	response["status"] = "OK"
+	response["routes"] = []string{}
+	response["pr"] = pr
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		log.Warn(err)
+		resp_err.Write(w)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

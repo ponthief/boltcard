@@ -46,9 +46,16 @@ func Createboltcard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limit_valid(tx_max) || !limit_valid(day_max) {
+		msg := "createboltcard: tx_max and day_max must not be negative"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
+
 	card_name := r.URL.Query().Get("card_name")
-	if card_name == "" {
-		msg := "createboltcard: the card name must be set"
+	if !card_name_valid(card_name) {
+		msg := "createboltcard: the card name must be set and be at most 100 printable characters"
 		log.Warn(msg)
 		resp_err.Write_message(w, msg)
 		return
@@ -94,6 +101,7 @@ func Createboltcard(w http.ResponseWriter, r *http.Request) {
 		uid_privacy_flag, allow_neg_bal_flag)
 	if err != nil {
 		log.Warn(err.Error())
+		resp_err.Write_message(w, "createboltcard: the card could not be created")
 		return
 	}
 
@@ -108,9 +116,10 @@ func Createboltcard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// log the response
+	// the URL holds the one time code, which is a secret, so it is not logged
 
 	log.WithFields(log.Fields{
-		"card_name": card_name, "url": url}).Info("createboltcard API response")
+		"card_name": card_name}).Info("createboltcard API response")
 
 	jsonData := []byte(`{"status":"OK",` +
 		`"url":"` + url + `"}`)

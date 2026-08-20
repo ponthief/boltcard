@@ -10,12 +10,15 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/boltcard/boltcard/db"
+	"github.com/boltcard/boltcard/safego"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	log "github.com/sirupsen/logrus"
 )
 
 func Send_balance_email(recipient_email string, card_id int) {
+
+	defer safego.Recover("Send_balance_email")
 
 	c, err := db.Get_card_from_card_id(card_id)
 	if err != nil {

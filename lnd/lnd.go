@@ -12,7 +12,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	decodepay "github.com/fiatjaf/ln-decodepay"
 	lnrpc "github.com/lightningnetwork/lnd/lnrpc"
 	invoicesrpc "github.com/lightningnetwork/lnd/lnrpc/invoicesrpc"
 	routerrpc "github.com/lightningnetwork/lnd/lnrpc/routerrpc"
@@ -26,6 +25,8 @@ import (
 
 	"github.com/boltcard/boltcard/db"
 	"github.com/boltcard/boltcard/email"
+	invoicepkg "github.com/boltcard/boltcard/invoice"
+	"github.com/boltcard/boltcard/safego"
 )
 
 type rpcCreds map[string]string
@@ -40,17 +41,21 @@ func newCreds(bytes []byte) rpcCreds {
 	return creds
 }
 
-func getGrpcConn(hostname string, port int, tlsFile, macaroonFile string) *grpc.ClientConn {
+// getGrpcConn returns a connection to the lightning node.
+//
+// Errors are returned rather than raising a panic. These functions are called
+// in their own goroutines, where a panic is not recovered by the HTTP server
+// and would stop the whole service, so an unreachable node or an unreadable
+// macaroon must not panic.
+func getGrpcConn(hostname string, port int, tlsFile, macaroonFile string) (*grpc.ClientConn, error) {
 	macaroonBytes, err := ioutil.ReadFile(macaroonFile)
 	if err != nil {
-		log.Println("Cannot read macaroon file .. ", err)
-		panic(err)
+		return nil, fmt.Errorf("cannot read macaroon file: %w", err)
 	}
 
 	mac := &macaroon.Macaroon{}
 	if err = mac.UnmarshalBinary(macaroonBytes); err != nil {
-		log.Println("Cannot unmarshal macaroon .. ", err)
-		panic(err)
+		return nil, fmt.Errorf("cannot unmarshal macaroon: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -58,7 +63,7 @@ func getGrpcConn(hostname string, port int, tlsFile, macaroonFile string) *grpc.
 
 	transportCredentials, err := credentials.NewClientTLSFromFile(tlsFile, hostname)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("cannot read the node TLS certificate: %w", err)
 	}
 
 	fullHostname := fmt.Sprintf("%s:%d", hostname, port)
@@ -69,11 +74,10 @@ func getGrpcConn(hostname string, port int, tlsFile, macaroonFile string) *grpc.
 		grpc.WithPerRPCCredentials(newCreds(macaroonBytes)),
 	}...)
 	if err != nil {
-		log.Printf("unable to connect to %s", fullHostname)
-		panic(err)
+		return nil, fmt.Errorf("unable to connect to %s: %w", fullHostname, err)
 	}
 
-	return connection
+	return connection, nil
 }
 
 // https://api.lightning.community/?shell#addinvoice
@@ -84,14 +88,22 @@ func Add_invoice(amount_sat int64, metadata string) (payment_request string, r_h
 	if err != nil {
 		return "", nil, err
 	}
+	ln_invoice_expiry, err := strconv.ParseInt(db.Get_setting("LN_INVOICE_EXPIRY_SEC"), 10, 64)
+	if err != nil {
+		return "", nil, err
+	}
 
 	dh := sha256.Sum256([]byte(metadata))
 
-	connection := getGrpcConn(
+	connection, err := getGrpcConn(
 		db.Get_setting("LN_HOST"),
 		ln_port,
 		db.Get_setting("LN_TLS_FILE"),
 		db.Get_setting("LN_MACAROON_FILE"))
+	if err != nil {
+		return "", nil, err
+	}
+	defer connection.Close()
 
 	l_client := lnrpc.NewLightningClient(connection)
 
@@ -101,6 +113,7 @@ func Add_invoice(amount_sat int64, metadata string) (payment_request string, r_h
 	result, err := l_client.AddInvoice(ctx, &lnrpc.Invoice{
 		Value:           amount_sat,
 		DescriptionHash: dh[:],
+		Expiry:          ln_invoice_expiry,
 	})
 
 	if err != nil {
@@ -114,6 +127,8 @@ func Add_invoice(amount_sat int64, metadata string) (payment_request string, r_h
 
 func Monitor_invoice_state(r_hash []byte) {
 
+	defer safego.Recover("Monitor_invoice_state")
+
 	// SubscribeSingleInvoice
 
 	// get node parameters from environment variables
@@ -123,16 +138,25 @@ func Monitor_invoice_state(r_hash []byte) {
 		log.Warn(err)
 		return
 	}
+	ln_invoice_expiry, err := strconv.Atoi(db.Get_setting("LN_INVOICE_EXPIRY_SEC"))
+	if err != nil {
+		log.Warn(err)
+		return
+	}
 
-	connection := getGrpcConn(
+	connection, err := getGrpcConn(
 		db.Get_setting("LN_HOST"),
 		ln_port,
 		db.Get_setting("LN_TLS_FILE"),
 		db.Get_setting("LN_MACAROON_FILE"))
+	if err != nil {
+		log.WithFields(log.Fields{"r_hash": hex.EncodeToString(r_hash)}).Warn(err)
+		return
+	}
 
 	i_client := invoicesrpc.NewInvoicesClient(connection)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ln_invoice_expiry)*time.Second)
 	defer cancel()
 
 	stream, err := i_client.SubscribeSingleInvoice(ctx, &invoicesrpc.SubscribeSingleInvoiceRequest{
@@ -196,6 +220,8 @@ func Monitor_invoice_state(r_hash []byte) {
 
 func PayInvoice(card_payment_id int, invoice string) {
 
+	defer safego.Recover("PayInvoice")
+
 	// SendPaymentV2
 
 	// get node parameters from environment variables
@@ -206,11 +232,16 @@ func PayInvoice(card_payment_id int, invoice string) {
 		return
 	}
 
-	connection := getGrpcConn(
+	connection, err := getGrpcConn(
 		db.Get_setting("LN_HOST"),
 		ln_port,
 		db.Get_setting("LN_TLS_FILE"),
 		db.Get_setting("LN_MACAROON_FILE"))
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
+		db.Update_payment_status(card_payment_id, "FAILED", "could not reach the lightning node")
+		return
+	}
 
 	r_client := routerrpc.NewRouterClient(connection)
 
@@ -228,12 +259,24 @@ func PayInvoice(card_payment_id int, invoice string) {
 		return
 	}
 
-	bolt11, _ := decodepay.Decodepay(invoice)
+	bolt11, err := invoicepkg.Decode(invoice)
+	if err != nil {
+		log.WithFields(log.Fields{"card_payment_id": card_payment_id}).Warn(err)
+		db.Update_payment_status(card_payment_id, "FAILED", "invoice could not be decoded")
+		return
+	}
+
 	invoice_msats := bolt11.MSatoshi
+	invoice_expiry := bolt11.Expiry
 
 	fee_limit_product := int64((fee_limit_percent / 100) * (float64(invoice_msats) / 1000))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// the payment attempt is given at least as long as the send timeout below
+	if invoice_expiry < 60 {
+		invoice_expiry = 60
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(invoice_expiry)*time.Second)
 	defer cancel()
 
 	stream, err := r_client.SendPaymentV2(ctx, &routerrpc.SendPaymentRequest{

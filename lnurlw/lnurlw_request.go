@@ -14,15 +14,6 @@ import (
 	"strings"
 )
 
-type ResponseData struct {
-	Tag                string `json:"tag"`
-	Callback           string `json:"callback"`
-	LnurlwK1           string `json:"k1"`
-	DefaultDescription string `json:"defaultDescription"`
-	MinWithdrawable    int    `json:"minWithdrawable"`
-	MaxWithdrawable    int    `json:"maxWithdrawable"`
-}
-
 func get_p_c(req *http.Request, p_name string, c_name string) (p string, c string) {
 
 	params_p, ok := req.URL.Query()[p_name]
@@ -93,8 +84,7 @@ func setup_card_record(uid string, ctr uint32, uid_bin []byte, ctr_bin []byte, c
 
 		if err != nil {
 			log.WithFields(log.Fields{
-				"card.card_id":     card.Card_id,
-				"card.k2_cmac_key": card.K2_cmac_key,
+				"card.card_id": card.Card_id,
 			}).Warn("card.k2_cmac_key decode failed - remove the invalid record")
 			return err
 		}
@@ -106,9 +96,9 @@ func setup_card_record(uid string, ctr uint32, uid_bin []byte, ctr_bin []byte, c
 		}
 
 		if cmac_valid == true {
+			// the card keys are secrets, so they are not logged
 			log.WithFields(log.Fields{
-				"card.card_id":     card.Card_id,
-				"card.k2_cmac_key": card.K2_cmac_key,
+				"card.card_id": card.Card_id,
 			}).Info("cmac match found")
 
 			// store the uid and ctr in the card record
@@ -129,9 +119,10 @@ func setup_card_record(uid string, ctr uint32, uid_bin []byte, ctr_bin []byte, c
 
 func parse_request(req *http.Request) (int, error) {
 
+	// the p and c parameters are card data, so the query string is not logged
+
 	pid := os.Getpid()
-	url := req.URL.RequestURI()
-	log.WithFields(log.Fields{"pid": pid, "url": url}).Debug("ln request")
+	log.WithFields(log.Fields{"pid": pid, "path": req.URL.Path}).Debug("ln request")
 
 	param_p, param_c := get_p_c(req, "p", "c")
 
@@ -184,7 +175,10 @@ func parse_request(req *http.Request) (int, error) {
 
 	uid_str := hex.EncodeToString(uid)
 
-	log.WithFields(log.Fields{"uid": uid_str, "ctr": ctr_int}).Info("decrypted card data")
+	// the card UID identifies the card holder, so it is kept out of the
+	// production logs - see docs/CARD_PRIVACY.md
+
+	log.WithFields(log.Fields{"uid": uid_str, "ctr": ctr_int}).Debug("decrypted card data")
 
 	card_count, err := db.Get_card_count_for_uid(uid_str)
 
@@ -255,6 +249,7 @@ func parse_request(req *http.Request) (int, error) {
 func Response(w http.ResponseWriter, req *http.Request) {
 
 	env_host_domain := db.Get_setting("HOST_DOMAIN")
+
 	if req.Host != env_host_domain {
 		log.Warn("wrong host domain")
 		resp_err.Write(w)
@@ -312,15 +307,29 @@ func Response(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	defalut_description := db.Get_setting("DEFAULT_DESCRIPTION")
+	// get pin_enable & pin_limit_sats
 
-	response := ResponseData{}
-	response.Tag = "withdrawRequest"
-	response.Callback = lnurlw_cb_url
-	response.LnurlwK1 = lnurlw_k1
-	response.DefaultDescription = defalut_description
-	response.MinWithdrawable = min_withdraw_sats * 1000 // milliSats
-	response.MaxWithdrawable = max_withdraw_sats * 1000 // milliSats
+	c, err := db.Get_card_from_card_id(card_id)
+	if err != nil {
+		log.WithFields(log.Fields{"card_id": card_id}).Warn(err)
+		resp_err.Write(w)
+		return
+	}
+
+	default_description := db.Get_setting("DEFAULT_DESCRIPTION")
+
+	response := make(map[string]interface{})
+
+	response["tag"] = "withdrawRequest"
+	response["callback"] = lnurlw_cb_url
+	response["k1"] = lnurlw_k1
+	response["defaultDescription"] = default_description
+	response["minWithdrawable"] = min_withdraw_sats * 1000 // milliSats
+	response["maxWithdrawable"] = max_withdraw_sats * 1000 // milliSats
+
+	if c.Pin_enable == "Y" {
+		response["pinLimit"] = c.Pin_limit_sats * 1000 // milliSats
+	}
 
 	jsonData, err := json.Marshal(response)
 

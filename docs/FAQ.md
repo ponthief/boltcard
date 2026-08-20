@@ -25,3 +25,21 @@ It can be useful to test paying invoices directly from your lightning node.
 # Can I use the same lightning node for the customer (bolt card) and the merchant (POS) ?
 
 When tested with LND in Nov 2022, the paying (customer, bolt card) lightning node must be a separate instance to the invoicing (merchant, POS) lightning node.
+
+# I get a 6982 error when trying to program a blank card
+
+A 6982 error is is known to happen after trying to use a 'blank' card which has been wiped with the CoinCorner customer app (July 2023) and happens because the card settings have not been cleared down correctly. It can also happen where a card is removed partway through programming (which can take a few seconds) or where the mobile device does not complete programming due to being in a low battery situation.
+The card settings can be fixed by using the 'Bolt Card NFC Card Creator' app. The card will then be blank and usable again.
+- Reset Keys
+- Enter all '0's in Key 0 until the field is full and copy to Keys 1-4
+- Reset Card Now
+- present the card
+
+# Why do I have to tap the card again after typing the PIN wrongly ?
+
+A wrong PIN uses up the withdraw request, so that only one PIN can be tried per
+card tap. Without this, the four digit PIN could be guessed in bulk during the
+life of a single withdraw request.
+
+Tap the card again to get a new withdraw request and enter the PIN once more.
+The failed attempt does not count towards the daily limit or the card balance.
