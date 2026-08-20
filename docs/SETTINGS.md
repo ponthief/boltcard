@@ -32,6 +32,8 @@ Here are the descriptions of values available to use in the `settings` table:
 | FUNCTION_LNDHUB | DISABLE | system level switch for using LNDHUB in place of LND |
 | LNDHUB_URL | | URL for the LNDHUB service |
 | FUNCTION_INTERNAL_API | DISABLE | system level switch for activating the internal API |
+| INTERNAL_API_KEY | | shared secret required by every internal API call - see [the internal API](INTERNAL_API.md) |
+| INTERNAL_API_LISTEN | 127.0.0.1:9001 | address the internal API listens on - defaults to the loopback interface |
 | SENDGRID_API_KEY      | | User API Key from SendGrid.com             |
 | SENDGRID_EMAIL_SENDER | | Single Sender email address verified by SendGrid |
 | LN_INVOICE_EXPIRY_SEC | 3600 | LN invoice's expiry time in seconds |

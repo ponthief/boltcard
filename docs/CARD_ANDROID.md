@@ -38,9 +38,11 @@ echo "writing host_domain to env vars"
 
 export HOST_DOMAIN=card.yourdomain.com
 ```
+- set up the internal API key, see [the internal API](INTERNAL_API.md)
 - use the internal API to create a card
-- `$ curl 'localhost:9001/createboltcard?card_name=card_5&enable=true&tx_max=1000&day_max=10000&uid_privacy=true&allow_neg_bal=true'`
+- `$ curl -H "Authorization: Bearer $INTERNAL_API_KEY" 'localhost:9001/createboltcard?card_name=card_5&enable=true&tx_max=1000&day_max=10000&uid_privacy=true&allow_neg_bal=true'`
 - this will give you a one-time link
+- treat the one-time link as a secret, it gives up the card keys to whoever opens it first
 
 on the app
 - click `scan QR code`
@@ -56,10 +58,10 @@ on the app
 ### Update the card settings
 
 - use the internal API to update settings for a card
-- `$ curl 'localhost:9001/updateboltcard?card_name=card_5&enable=true&tx_max=100&day_max=1000'`
+- `$ curl -H "Authorization: Bearer $INTERNAL_API_KEY" 'localhost:9001/updateboltcard?card_name=card_5&enable=true&tx_max=100&day_max=1000'`
 
 ### Wipe a card
 
 - use the internal API to wipe a card
-- `$ curl 'localhost:9001/wipeboltcard?card_name=card_5'`
+- `$ curl -H "Authorization: Bearer $INTERNAL_API_KEY" 'localhost:9001/wipeboltcard?card_name=card_5'`
 - this will mark the card as wiped and return the keys for the app to wipe the card

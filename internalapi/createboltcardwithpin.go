@@ -57,9 +57,16 @@ func Createboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limit_valid(tx_max) || !limit_valid(day_max) {
+		msg := "createboltcardwithpin: tx_max and day_max must not be negative"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
+
 	card_name := r.URL.Query().Get("card_name")
-	if card_name == "" {
-		msg := "createboltcardwithpin: the card name must be set"
+	if !card_name_valid(card_name) {
+		msg := "createboltcardwithpin: the card name must be set and be at most 100 printable characters"
 		log.Warn(msg)
 		resp_err.Write_message(w, msg)
 		return
@@ -93,6 +100,12 @@ func Createboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pin_number := r.URL.Query().Get("pin_number")
+	if !pin_valid(pin_number) {
+		msg := "createboltcardwithpin: pin_number must be four digits"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
 
 	pin_limit_sats_str := r.URL.Query().Get("pin_limit_sats")
 	pin_limit_sats, err := strconv.Atoi(pin_limit_sats_str)
@@ -103,13 +116,21 @@ func Createboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limit_valid(pin_limit_sats) {
+		msg := "createboltcardwithpin: pin_limit_sats must not be negative"
+		log.Warn(msg)
+		resp_err.Write_message(w, msg)
+		return
+	}
+
 	// log the request
+	// the PIN is a secret, so it is not logged
 
 	log.WithFields(log.Fields{
 		"card_name": card_name, "tx_max": tx_max, "day_max": day_max,
 		"enable": enable_flag, "uid_privacy": uid_privacy_flag,
 		"allow_neg_bal": allow_neg_bal_flag, "enable_pin": pin_enable_flag,
-		"pin_number": pin_number, "pin_limit_sats": pin_limit_sats}).Info("createboltcardwithpin API request")
+		"pin_limit_sats": pin_limit_sats}).Info("createboltcardwithpin API request")
 
 	// create the keys
 
@@ -126,6 +147,7 @@ func Createboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 		uid_privacy_flag, allow_neg_bal_flag, pin_enable_flag, pin_number, pin_limit_sats)
 	if err != nil {
 		log.Warn(err.Error())
+		resp_err.Write_message(w, "createboltcardwithpin: the card could not be created")
 		return
 	}
 
@@ -140,9 +162,10 @@ func Createboltcardwithpin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// log the response
+	// the URL holds the one time code, which is a secret, so it is not logged
 
 	log.WithFields(log.Fields{
-		"card_name": card_name, "url": url}).Info("createboltcard API response")
+		"card_name": card_name}).Info("createboltcardwithpin API response")
 
 	jsonData := []byte(`{"status":"OK",` +
 		`"url":"` + url + `"}`)
