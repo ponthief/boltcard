@@ -147,6 +147,8 @@ func main() {
 	// lnurlp for lightning address
 	external_router.Path("/.well-known/lnurlp/{name}").Methods("GET").HandlerFunc(limited(lnurlp.Response))
 	external_router.Path("/lnurlp/{name}").Methods("GET").HandlerFunc(limited(lnurlp.Callback))
+	// payment approval from the card holder's notification
+	external_router.Path("/approve").Methods("GET").HandlerFunc(limited(approve_request))
 
 	// internal API
 	// this creates cards and reads or wipes card settings, so it is not to be

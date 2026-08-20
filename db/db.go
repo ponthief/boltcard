@@ -1,7 +1,9 @@
 package db
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -67,6 +69,19 @@ const (
 	NostrPay = iota
 	NostrRec = iota
 )
+
+// random_hex_16 returns 16 random bytes as hex, for values that must not be
+// guessable, such as an approval token.
+func random_hex_16() (string, error) {
+	b := make([]byte, 16)
+
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(b), nil
+}
 
 func open() (*sql.DB, error) {
 
@@ -753,7 +768,7 @@ func Release_payment(card_payment_id int, failure_reason string) error {
 	}
 	defer db.Close()
 
-	sqlStatement := `UPDATE card_payments SET amount_msats = NULL,` +
+	sqlStatement := `UPDATE card_payments SET amount_msats = NULL, ntfy_token = '',` +
 		` payment_status = 'FAILED', failure_reason = $2, payment_status_time = NOW()` +
 		` WHERE card_payment_id = $1 AND payment_status = '';`
 	res, err := db.Exec(sqlStatement, card_payment_id, failure_reason)
@@ -826,6 +841,103 @@ func Update_payment_ntfy(card_payment_id int, ntfy_flag string) error {
 
 	return nil
 }
+
+// Create_payment_ntfy_token gives a payment awaiting approval a single use
+// token and returns it.
+//
+// The token is what the approval notification carries, so that approving a
+// payment needs no API key and can only ever affect the one payment it was
+// made for.
+func Create_payment_ntfy_token(card_payment_id int) (string, error) {
+
+	token, err := random_hex_16()
+	if err != nil {
+		return "", err
+	}
+
+	db, err := open()
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	sqlStatement := `UPDATE card_payments SET ntfy_token = $2 WHERE card_payment_id = $1;`
+	res, err := db.Exec(sqlStatement, card_payment_id, token)
+	if err != nil {
+		return "", err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if count != 1 {
+		return "", errors.New("not one card_payments record updated")
+	}
+
+	return token, nil
+}
+
+// Approve_payment_by_token records the card holder's answer for the payment
+// holding the given token, and clears the token so that it cannot be used
+// again.
+//
+// Only a payment that has been claimed and that the node has not reported on
+// can be answered, so a token stops working once the payment has been sent or
+// released. It reports whether a payment was answered.
+func Approve_payment_by_token(ntfy_token string, ntfy_flag string) (bool, error) {
+
+	if ntfy_token == "" {
+		return false, nil
+	}
+
+	db, err := open()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	sqlStatement := `UPDATE card_payments SET ntfy_flag = $2, ntfy_ts = NOW(), ntfy_token = ''` +
+		` WHERE ntfy_token = $1 AND paid_flag = 'Y' AND payment_status = '';`
+	res, err := db.Exec(sqlStatement, ntfy_token, ntfy_flag)
+	if err != nil {
+		return false, err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return count == 1, nil
+}
+
+// Get_payment_approval reports whether the card holder has answered for a
+// payment and, when they have, whether they approved it.
+func Get_payment_approval(card_payment_id int) (answered bool, approved bool, err error) {
+
+	db, err := open()
+	if err != nil {
+		return false, false, err
+	}
+	defer db.Close()
+
+	ntfy_flag := ""
+	var ntfy_ts sql.NullString
+
+	sqlStatement := `SELECT ntfy_flag, ntfy_ts FROM card_payments WHERE card_payment_id = $1;`
+	row := db.QueryRow(sqlStatement, card_payment_id)
+	err = row.Scan(&ntfy_flag, &ntfy_ts)
+	if err != nil {
+		return false, false, err
+	}
+
+	// the timestamp is only set once an answer has been given
+	if !ntfy_ts.Valid {
+		return false, false, nil
+	}
+
+	return true, ntfy_flag == "Y", nil
+}
+
 func Get_card_totals(card_id int) (int, error) {
 
 	db, err := open()

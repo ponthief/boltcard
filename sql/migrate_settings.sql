@@ -21,6 +21,11 @@ FROM (VALUES
 	('EXTERNAL_RATE_BURST', ''),
 	('EXTERNAL_MAX_CONCURRENT', ''),
 	('SETTING_CACHE_SEC', ''),
+	('FUNCTION_NTFY', 'DISABLE'),
+	('NTFY_URL', ''),
+	('NTFY_TOPIC', ''),
+	('NTFY_USER', ''),
+	('NTFY_PASSWORD', ''),
 	('LN_INVOICE_EXPIRY_SEC', '3600'),
 	('DEFAULT_DESCRIPTION', 'bolt card service')
 ) AS new_settings(name, value)
