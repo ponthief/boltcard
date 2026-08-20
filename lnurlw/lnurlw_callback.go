@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,10 +21,31 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// how long the card holder has to approve a payment, and how often the answer
-// is looked for
-const approval_period = 1 * time.Minute
+// how long the card holder has to approve a payment when NTFY_APPROVAL_SEC is
+// not set, and how often the answer is looked for
+//
+// a notification can take a while to reach a phone, so the period may need to
+// be longer than the default at a till
+const default_approval_sec = 60
 const approval_poll_interval = 2 * time.Second
+
+// approval_period returns how long to wait for the card holder's answer.
+func approval_period() time.Duration {
+	seconds := default_approval_sec
+
+	setting := strings.TrimSpace(db.Get_setting("NTFY_APPROVAL_SEC"))
+	if setting != "" {
+		value, err := strconv.Atoi(setting)
+		if err != nil || value < 1 {
+			log.Warn("the NTFY_APPROVAL_SEC setting is not a valid number of seconds - using ",
+				default_approval_sec)
+		} else {
+			seconds = value
+		}
+	}
+
+	return time.Duration(seconds) * time.Second
+}
 
 type LndhubAuthRequest struct {
 	Login    string `json:"login"`
@@ -228,7 +250,7 @@ func await_approval(card_payment_id int, invoice_sats int, param_pr string) {
 		return
 	}
 
-	deadline := time.Now().Add(approval_period)
+	deadline := time.Now().Add(approval_period())
 
 	for time.Now().Before(deadline) {
 		time.Sleep(approval_poll_interval)

@@ -12,7 +12,7 @@ holder approves it from an [ntfy](https://ntfy.sh) notification on their phone.
    does the rest on its own
 4. a notification is published with Approve and Reject buttons
 5. the payment is sent when the card holder approves within the approval period,
-   which is one minute
+   which is `NTFY_APPROVAL_SEC` seconds, one minute by default
 6. a payment that is rejected, or not answered in time, is marked failed and its
    amount is cleared, so it counts towards neither the daily limit nor the card
    balance. The card tap stays spent either way.
@@ -54,6 +54,12 @@ from a notification.
 | NTFY_TOPIC | | the topic to publish to, required |
 | NTFY_USER | | username for the ntfy server, where it needs one |
 | NTFY_PASSWORD | | password for the ntfy server, where it needs one |
+| NTFY_APPROVAL_SEC | 60 | seconds to wait for the card holder's answer |
+
+A self hosted ntfy server delivering over websocket rather than a push service
+can take minutes to wake a phone that is asleep. Where that happens, raise
+`NTFY_APPROVAL_SEC` so the notification is still answerable when it arrives, and
+check the phone's battery settings for the ntfy app.
 
 Subscribe to the same topic on the phone. The topic name is all that is needed
 to send notifications to it on a public ntfy server, so choose one that cannot
