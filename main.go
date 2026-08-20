@@ -65,6 +65,20 @@ func setting_int(setting_name string, default_value int) int {
 }
 
 func main() {
+	// settings are read on every request, so they are held briefly rather than
+	// read from the database each time
+	// SETTING_CACHE_SEC of 0 turns that off, at the cost of database load
+	setting_cache_sec := db.Default_setting_cache_sec
+	if setting_cache_sec_str := strings.TrimSpace(db.Get_setting_now("SETTING_CACHE_SEC")); setting_cache_sec_str != "" {
+		if seconds, err := strconv.Atoi(setting_cache_sec_str); err == nil {
+			setting_cache_sec = seconds
+		} else {
+			log.Warn("the SETTING_CACHE_SEC setting is not a valid integer - using ",
+				db.Default_setting_cache_sec)
+		}
+	}
+	db.Set_setting_cache_seconds(setting_cache_sec)
+
 	log_level := db.Get_setting("LOG_LEVEL")
 
 	switch log_level {
@@ -81,6 +95,12 @@ func main() {
 	log.SetFormatter(&log.JSONFormatter{
 		DisableHTMLEscape: true,
 	})
+
+	if setting_cache_sec > 0 {
+		log.Info("settings are read from the database at most every ", setting_cache_sec, "s")
+	} else {
+		log.Info("settings are read from the database on every use")
+	}
 
 	var external_router = mux.NewRouter()
 	var internal_router = mux.NewRouter()
