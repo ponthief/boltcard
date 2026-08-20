@@ -85,26 +85,7 @@ func open() (*sql.DB, error) {
 	return db, nil
 }
 
-func Get_setting(setting_name string) string {
-
-	setting_value := ""
-
-	db, err := open()
-	if err != nil {
-		return ""
-	}
-	defer db.Close()
-
-	sqlStatement := `select value from settings where name=$1;`
-
-	row := db.QueryRow(sqlStatement, setting_name)
-	err = row.Scan(&setting_value)
-	if err != nil {
-		return ""
-	}
-
-	return setting_value
-}
+// settings are read through a short lived cache, see settings.go
 
 func Get_new_card(one_time_code string) (*Card, error) {
 

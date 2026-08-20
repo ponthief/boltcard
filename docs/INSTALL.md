@@ -112,6 +112,13 @@ add email notifications for payments and fund receipt
 `cards.email_enable='Y'`  
   
 the email address will be *{cards.email_address}@{HOST_DOMAIN}*  
+#### upgrading an existing install
+if the database was created by an earlier version, add any missing settings rows  
+`$ psql card_db -f sql/migrate_settings.sql`  
+then set `INTERNAL_API_KEY` (see [the internal API](INTERNAL_API.md)) and, where
+Caddy or another reverse proxy is in front of the service, set
+`TRUSTED_PROXY_COUNT` to the number of proxies - `1` for the setup above  
+see [settings](SETTINGS.md) for the full list  
 #### production use
 ensure that LOG_LEVEL is set to PRODUCTION (settings table)  
 ensure that all secrets are minimally available  

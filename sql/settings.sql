@@ -35,6 +35,7 @@ INSERT INTO settings (name, value) VALUES ('TRUSTED_PROXY_COUNT', '');
 INSERT INTO settings (name, value) VALUES ('EXTERNAL_RATE_LIMIT_PER_MIN', '');
 INSERT INTO settings (name, value) VALUES ('EXTERNAL_RATE_BURST', '');
 INSERT INTO settings (name, value) VALUES ('EXTERNAL_MAX_CONCURRENT', '');
+INSERT INTO settings (name, value) VALUES ('SETTING_CACHE_SEC', '');
 INSERT INTO settings (name, value) VALUES ('SENDGRID_API_KEY', '');
 INSERT INTO settings (name, value) VALUES ('SENDGRID_EMAIL_SENDER', '');
 INSERT INTO settings (name, value) VALUES ('LN_INVOICE_EXPIRY_SEC', '3600');
