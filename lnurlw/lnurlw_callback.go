@@ -6,11 +6,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
+    "time"
 	"github.com/boltcard/boltcard/db"
 	"github.com/boltcard/boltcard/lnd"
 	"github.com/boltcard/boltcard/lndhub"
 	"github.com/boltcard/boltcard/resp_err"
+	ntfy "github.com/boltcard/boltcard/ntfy"
 	decodepay "github.com/fiatjaf/ln-decodepay"
 	log "github.com/sirupsen/logrus"
 )
@@ -187,8 +188,7 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 		}
 	}
 
-	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("paying invoice")
-
+	log.WithFields(log.Fields{"card_payment_id": p.Card_payment_id}).Info("paying invoice")    
 	// update paid_flag so we only attempt payment once
 	err = db.Update_payment_paid(p.Card_payment_id)
 	if err != nil {
@@ -196,14 +196,35 @@ func lnd_payment(w http.ResponseWriter, p *db.Payment, bolt11 decodepay.Bolt11, 
 		resp_err.Write(w)
 		return
 	}
-
+    go ntfy.SendNtfycation(p.Card_payment_id, invoice_sats)		
+	responseTimeout := 1 * time.Minute
+    ntfyStatus := false
+	deadline := time.Now().Add(responseTimeout)
+	for time.Now().Before(deadline) {
+		ntfyStatus,err = db.Check_payment_ntfy(p.Card_payment_id)
+	    //log.Info("Notif status: ", ntfyStatus)
+		if err != nil {
+			log.Warn(err.Error())
+		}
+		if (ntfyStatus) {
+			break
+		}
+        time.Sleep(5 * time.Second)
+	}
+	
 	// https://github.com/fiatjaf/lnurl-rfc/blob/luds/03.md
 	//
 	// LN SERVICE sends a {"status": "OK"} or
 	// {"status": "ERROR", "reason": "error details..."}
 	//  JSON response and then attempts to pay the invoices asynchronously.
 
-	go lnd.PayInvoice(p.Card_payment_id, param_pr)
+	if (ntfyStatus) {
+		log.Info("Payment Approved")		
+	    go lnd.PayInvoice(p.Card_payment_id, param_pr)
+	} else {
+		log.Warn("Payment Rejected")
+	}
+    
 
 	log.Debug("sending 'status OK' response")
 

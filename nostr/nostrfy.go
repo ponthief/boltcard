@@ -16,6 +16,7 @@ import (
 
 func SendNostrfication(card_id int, card_name string, payOrRec int) {
 	requestURL := fmt.Sprintf("https://%s/.well-known/nostr.json?name=%s", db.Get_setting("HOST_DOMAIN"), card_name)
+	log.Info(requestURL)
 	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 	if err != nil {
 		log.Warn(err.Error())
@@ -46,20 +47,22 @@ func SendNostrfication(card_id int, card_name string, payOrRec int) {
 	} else {
 		log.Warn("No NIP-05 addresses...Unable to send payment/receipt info")
 		return
-	}
-
+	}	
 	bolt_bot_privkey := db.Get_setting("NOSTR_BOT_PRIVKEY_HEX")
 	nostr_rel_list := db.Get_setting("NOSTR_RELAYS_LIST")
 	if bolt_bot_privkey != "" && nostr_rel_list != "" && len(nipNames) != 0 {
-		last_tnx, err := db.Get_latest_card_tx(card_id, payOrRec)
+		last_tnx, err := db.Get_latest_card_tx(card_id, payOrRec)		
 		if err != nil {
 			log.Warn(err.Error())
 			return
-		}
+		}		
 		nmsg := fmt.Sprintf("you made payment of %d sats via BoltCard", last_tnx.Tx_amount_msats/1000)
 		if payOrRec == db.NostrRec {
-			nmsg = fmt.Sprintf("you received %d sats via BoltCard service", last_tnx.Tx_amount_msats/1000)
-		}
+				nmsg = fmt.Sprintf("you received %d sats via BoltCard service", last_tnx.Tx_amount_msats/1000)
+			}
+		if last_tnx.Tx_status == "FAILED" {
+           nmsg = fmt.Sprintf("Last Transaction failed due to: %s", last_tnx.Tx_reason)
+		}			
 		tags := make(nostr.Tags, 0)
 		for nkey, npub := range nipNames {
 			msg := fmt.Sprintf("Hey %s, %s - %s", nkey, nmsg, last_tnx.Tx_time)
@@ -84,7 +87,7 @@ func SendNostrfication(card_id int, card_name string, payOrRec int) {
 					log.Warn(err.Error())
 					continue
 				}
-				_, err = relay.Publish(ctx, ev)
+				err = relay.Publish(ctx, ev)
 				if err != nil {
 					log.Warn(err.Error())
 					continue

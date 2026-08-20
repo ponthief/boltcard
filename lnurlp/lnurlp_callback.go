@@ -52,7 +52,7 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 
 	amount_sat := amount_msat / 1000
 
-	metadata := "[[\"text/identifier\",\"" + name + "@" + domain + "\"],[\"text/plain\",\"bolt card deposit\"]]"
+	metadata := "[[\"text/identifier\",\"" + name + "@" + domain + "\"],[\"text/plain\",\"BiTaurus Pay\"]]"
 	pr, r_hash, err := lnd.Add_invoice(amount_sat, metadata)
 	if err != nil {
 		log.Warn("could not add_invoice")

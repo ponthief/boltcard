@@ -47,7 +47,7 @@ func Response(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata := "[[\\\"text/identifier\\\",\\\"" + name + "@" + domain + "\\\"],[\\\"text/plain\\\",\\\"bolt card deposit\\\"]]"
+	metadata := "[[\\\"text/identifier\\\",\\\"" + name + "@" + domain + "\\\"],[\\\"text/plain\\\",\\\"BiTaurus Pay\\\"]]"
 
 	jsonData := []byte(`{"status":"OK",` +
 		`"callback":"https://` + domain + `/lnurlp/` + name + `",` +
