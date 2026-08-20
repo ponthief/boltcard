@@ -41,6 +41,7 @@ INSERT INTO settings (name, value) VALUES ('NTFY_URL', '');
 INSERT INTO settings (name, value) VALUES ('NTFY_TOPIC', '');
 INSERT INTO settings (name, value) VALUES ('NTFY_USER', '');
 INSERT INTO settings (name, value) VALUES ('NTFY_PASSWORD', '');
+INSERT INTO settings (name, value) VALUES ('NTFY_APPROVAL_SEC', '');
 INSERT INTO settings (name, value) VALUES ('SENDGRID_API_KEY', '');
 INSERT INTO settings (name, value) VALUES ('SENDGRID_EMAIL_SENDER', '');
 INSERT INTO settings (name, value) VALUES ('LN_INVOICE_EXPIRY_SEC', '3600');

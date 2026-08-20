@@ -66,6 +66,7 @@ Here are the descriptions of values available to use in the `settings` table:
 | NTFY_TOPIC | | the ntfy topic to publish approval requests to - approval requests are not sent without it |
 | NTFY_USER | | username for the ntfy server, where it needs one |
 | NTFY_PASSWORD | | password for the ntfy server, where it needs one |
+| NTFY_APPROVAL_SEC | 60 | seconds the card holder has to approve a payment before it is released - raise it where notifications reach the phone slowly |
 | SETTING_CACHE_SEC | 10 | seconds a setting value is reused before it is read from the database again - a change to a setting takes up to this long to come into effect, `0` reads every time |
 | SENDGRID_API_KEY      | | User API Key from SendGrid.com             |
 | SENDGRID_EMAIL_SENDER | | Single Sender email address verified by SendGrid |

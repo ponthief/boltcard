@@ -26,6 +26,7 @@ FROM (VALUES
 	('NTFY_TOPIC', ''),
 	('NTFY_USER', ''),
 	('NTFY_PASSWORD', ''),
+	('NTFY_APPROVAL_SEC', ''),
 	('LN_INVOICE_EXPIRY_SEC', '3600'),
 	('DEFAULT_DESCRIPTION', 'bolt card service')
 ) AS new_settings(name, value)

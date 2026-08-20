@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	gotfy "github.com/AnthonyHewins/gotfy"
 	"github.com/boltcard/boltcard/db"
@@ -16,6 +17,9 @@ import (
 
 // the ntfy server to publish to, when NTFY_URL is not set
 const default_ntfy_url = "http://localhost:2586"
+
+// how long publishing a notification may take before it is given up on
+const publish_timeout = 15 * time.Second
 
 type AddHeaderTransport struct {
 	T    http.RoundTripper
@@ -76,7 +80,13 @@ func SendNtfycation(card_payment_id int, invoice_amt int, approval_token string)
 		auth = basicAuth(ntfy_user, db.Get_setting("NTFY_PASSWORD"))
 	}
 
-	client := &http.Client{Transport: NewAddHeaderTransport(nil, auth)}
+	// the timeout matters: this runs in the goroutine that holds a claimed
+	// payment, so an ntfy server that accepts a connection and then stalls
+	// would otherwise leave the payment claimed for ever
+	client := &http.Client{
+		Transport: NewAddHeaderTransport(nil, auth),
+		Timeout:   publish_timeout,
+	}
 
 	publisher, err := gotfy.NewPublisher(server, client)
 	if err != nil {
@@ -120,7 +130,10 @@ func SendNtfycation(card_payment_id int, invoice_amt int, approval_token string)
 		log.Warn("bad icon: " + err.Error())
 	}
 
-	_, err = publisher.SendMessage(context.Background(), &gotfy.Message{
+	ctx, cancel := context.WithTimeout(context.Background(), publish_timeout)
+	defer cancel()
+
+	_, err = publisher.SendMessage(ctx, &gotfy.Message{
 		Topic:    topic,
 		Message:  fmt.Sprintf("Authorise %d sats payment via BoltCard", invoice_amt),
 		Title:    "BoltCard Payment Request",
