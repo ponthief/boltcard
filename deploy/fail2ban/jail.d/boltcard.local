@@ -1,0 +1,30 @@
+# fail2ban jail for the bolt card service
+#
+# Copy to /etc/fail2ban/jail.d/boltcard.local and set the Cloudflare values.
+# The file holds an API token, so: chmod 640, owned by root.
+#
+# Where the site is not behind Cloudflare, drop the two cf lines and the
+# action, and fail2ban's default firewall action applies instead.
+
+[boltcard]
+enabled  = true
+filter   = boltcard
+backend  = systemd
+
+# where Caddy writes its access log
+# with a log file instead of the journal, set:
+#   backend = auto
+#   logpath = /var/log/caddy/access.log
+
+# a caller has to be turned away this many times in this window to be banned
+maxretry = 20
+findtime = 10m
+bantime  = 1h
+
+# banning at this machine's firewall does nothing while Cloudflare is in front,
+# because the packets arrive from Cloudflare rather than from the caller, so the
+# ban is placed at Cloudflare instead
+action = cloudflare-token[cfzone="YOUR_CLOUDFLARE_ZONE_ID", cftoken="YOUR_SCOPED_API_TOKEN"]
+
+# never ban yourself or the reverse proxy
+ignoreip = 127.0.0.1/8 ::1

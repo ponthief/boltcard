@@ -27,6 +27,7 @@ The simplest way to understand and set up your own system is to read the main do
 | [Manual Card Creation](docs/CARD_MANUAL.md) | Bolt card creation using NXP TagXplorer software |
 | [Internal API](docs/INTERNAL_API.md) | Internal API access control |
 | [Payment Approval](docs/NTFY_APPROVAL.md) | Approving payments by ntfy notification |
+| [fail2ban](docs/FAIL2BAN.md) | Banning abusive callers |
 | [LndHub Payments](docs/LNDHUB.md) | How to use LndHub |
 | [FAQ](docs/FAQ.md) | Frequently asked questions |
 | [Datasheet](docs/NT4H2421Gx.pdf) | NXP NTAG424DNA datasheet |

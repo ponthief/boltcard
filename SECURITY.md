@@ -52,3 +52,6 @@ a caller cannot dodge the limiter by sending a header of its own.
 
 `/ping` is not limited, so that health checks still answer while the service is
 busy.
+
+To stop an abusive caller reaching the service at all, see
+[fail2ban](docs/FAIL2BAN.md).
