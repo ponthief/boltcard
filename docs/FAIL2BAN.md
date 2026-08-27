@@ -24,6 +24,28 @@ So there are two parts to getting this right:
 If your site is not behind Cloudflare, neither applies: drop the `action` line
 from the jail and fail2ban's normal firewall action does the job.
 
+## Two things that catch people out
+
+Both showed up in a real log from a live install, so check for them before
+trusting any of this.
+
+**The address in the log is the proxy's, not the caller's.** A line like
+
+```
+104.22.56.205 - - [27/Aug/2026:15:37:27 +0000] "GET /admin HTTP/2.0" 200 1168
+```
+
+looks like an attacker at `104.22.56.205`, but that address is inside
+`104.16.0.0/13`, which belongs to Cloudflare. Banning it takes the site off the
+air for everybody. Fix it by trusting the proxy, below, and until then the jail
+lists the Cloudflare ranges in `ignoreip` so a mistake cannot fire.
+
+**A site that answers unknown paths with its own page returns 200 to a
+scanner.** In the same log every probe for `/admin`, `/console`, `/panel` and
+the rest was answered `200 1168` - the single page app's own index. A filter
+that matches only 404 and 403 never fires on any of it. That is why this filter
+also matches the paths themselves.
+
 ## 1. Caddy: log JSON, and trust the proxy
 
 In the global options block, list the proxies in front of you. The current
@@ -67,6 +89,11 @@ address alongside `remote_ip` holding Cloudflare's. The filter prefers
 `client_ip` and falls back to `remote_ip` where it is absent, so it works either
 way.
 
+Where the log is in a common log format instead, from a `format transform`
+template, use `{request>client_ip}` in place of `{request>remote_ip}` so the
+address at the start of each line is the caller. The filter reads that format
+too.
+
 ## 2. Install the filter and the jail
 
 ```
@@ -98,9 +125,17 @@ $ sudo fail2ban-client status boltcard
 | HTTP 429 | the card service's own rate limit turned the caller away |
 | HTTP 503 | the service was already handling as many requests as it will take at once |
 | HTTP 404 | a request for a path the site does not serve, which is what scanning looks like |
+| a request for a path in `badpaths` | scanning, whatever status the site answered with |
 
 Twenty of those from one address within ten minutes earns an hour's ban. Adjust
 `maxretry`, `findtime` and `bantime` to taste.
+
+`badpaths` is two lists in the filter. `scanpaths` holds paths nothing but a
+scanner asks for - `/wp-login`, `/.env`, `/phpmyadmin` and so on. `sitepaths`
+holds ones many sites do serve - `/admin`, `/dashboard`, `/portal`. **Remove
+anything from `sitepaths` that your site serves**, or a real visitor asking for
+it gets banned. `/account` and `/app` are deliberately not in the list, being
+too likely to be real.
 
 **What it cannot see.** The card service answers its own errors with HTTP 200
 and `{"status":"ERROR"}` in the body, because that is what LNURL asks for. A bad
