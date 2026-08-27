@@ -89,10 +89,45 @@ address alongside `remote_ip` holding Cloudflare's. The filter prefers
 `client_ip` and falls back to `remote_ip` where it is absent, so it works either
 way.
 
-Where the log is in a common log format instead, from a `format transform`
-template, use `{request>client_ip}` in place of `{request>remote_ip}` so the
-address at the start of each line is the caller. The filter reads that format
-too.
+Where the log is in a common log format instead, from the
+[transform encoder](https://github.com/caddyserver/transform-encoder), note that
+the `{common_log}` shortcut uses `remote_ip` - the proxy. Spell the template out
+so it uses `client_ip`:
+
+```caddy
+log {
+	output file /var/log/caddy/thrilla.me-access.log
+	format transform `{request>client_ip} - - [{ts}] "{request>method} {request>uri} {request>proto}" {status} {size}` {
+		time_format "02/Jan/2006:15:04:05 -0700"
+	}
+}
+```
+
+The filter reads that format too. Check the first field of a new log line after
+reloading: it should be a visitor's address, not the proxy's.
+
+## While you are in there: anything else keyed on the caller
+
+`trusted_proxies` fills in `{client_ip}`; it does not change `{remote_host}`,
+which stays the address of the machine that opened the connection. Anything
+already keyed on `{remote_host}` is therefore keyed on the proxy, and is
+counting every visitor as one. Rate limiting a login form is the usual case:
+
+```caddy
+rate_limit {
+	zone admin_login {
+		key    {client_ip}
+		events 5
+		window 1m
+	}
+}
+```
+
+The same applies to the card service, which does its own per caller rate
+limiting from `X-Forwarded-For`. Set `TRUSTED_PROXY_COUNT` to the number of
+proxies in front of it - `2` where Cloudflare passes to Caddy and Caddy passes
+to the service, because each adds an entry to that header. See
+[settings](SETTINGS.md).
 
 ## 2. Install the filter and the jail
 
