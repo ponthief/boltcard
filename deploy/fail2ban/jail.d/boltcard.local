@@ -3,16 +3,20 @@
 # Copy to /etc/fail2ban/jail.d/boltcard.local and set the Cloudflare values.
 # The file holds an API token, so: chmod 640, owned by root.
 #
-# Where the site is not behind Cloudflare, drop the two cf lines and the
-# action, and fail2ban's default firewall action applies instead.
+# Where the site is not behind Cloudflare, drop the action line and the
+# Cloudflare addresses from ignoreip, and fail2ban's default firewall action
+# applies instead.
 
 [boltcard]
 enabled  = true
 filter   = boltcard
-backend  = systemd
 
-# where Caddy writes its access log
-# with a log file instead of the journal, set:
+# Caddy's access log
+#
+# through the journal:
+backend  = systemd
+#
+# or from a file, in which case comment out the line above and use:
 #   backend = auto
 #   logpath = /var/log/caddy/access.log
 
@@ -26,5 +30,19 @@ bantime  = 1h
 # ban is placed at Cloudflare instead
 action = cloudflare-token[cfzone="YOUR_CLOUDFLARE_ZONE_ID", cftoken="YOUR_SCOPED_API_TOKEN"]
 
-# never ban yourself or the reverse proxy
+# Never ban Cloudflare itself.
+#
+# This is a safety net rather than a nicety. Until Caddy is told which proxies
+# to trust, every request looks like it came from Cloudflare, and banning one of
+# these addresses takes the site off the air for everybody. Check with
+# fail2ban-regex that the addresses matched are callers and not these, see
+# docs/FAIL2BAN.md.
+#
+# The current list is published at https://www.cloudflare.com/ips/
 ignoreip = 127.0.0.1/8 ::1
+           173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
+           141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
+           197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13
+           104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+           2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32
+           2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
